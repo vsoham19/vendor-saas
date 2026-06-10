@@ -4,6 +4,7 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/store/authStore';
+import { supabase } from '@/utils/supabase';
 
 interface DashboardStats {
   todayAppointmentsCount: number;
@@ -34,7 +35,7 @@ interface AppointmentItemFeed {
 export default function DashboardPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const activeUser = user || { fullName: 'Alex Mercer' };
+  const activeUser = user || { fullName: 'Soham Vaghasia' };
 
   const currentDateString = new Date().toLocaleDateString('en-IN', {
     weekday: 'long',
@@ -44,55 +45,112 @@ export default function DashboardPage() {
   });
 
   // Query 1: Fetch 4-Point Bento Metric Metrics Row Summary
-  const { data: stats } = useQuery<DashboardStats>({
+  const { data: stats = { todayAppointmentsCount: 0, nextAppointmentTime: null, thisMonthRevenue: 0, totalOutstandingDues: 0, ordersInProgressCount: 0 } } = useQuery<DashboardStats>({
     queryKey: ['dashboard-metrics'],
     queryFn: async () => {
-      // Accessible via standard fetch endpoints mapping the multi-tenant scope natively
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const endOfToday = new Date();
+      endOfToday.setHours(23, 59, 59, 999);
+
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+
+      // A. Count today's appointments
+      const { data: apptsToday } = await supabase
+        .from('appointments')
+        .select('id, scheduled_date, time_slot')
+        .gte('scheduled_date', startOfToday.toISOString())
+        .lte('scheduled_date', endOfToday.toISOString())
+        .order('scheduled_date', { ascending: true });
+
+      const nextAppt = (apptsToday || []).find(appt => new Date(appt.scheduled_date) > new Date());
+      const nextTime = nextAppt ? nextAppt.time_slot : (apptsToday?.[0]?.time_slot || null);
+
+      // B. Sum of this month's revenue (from payments table)
+      const { data: paymentsThisMonth } = await supabase
+        .from('payments')
+        .select('amount')
+        .gte('created_at', startOfMonth.toISOString());
+
+      const monthlyRev = (paymentsThisMonth || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+      // C. Sum of all outstanding dues on orders
+      const { data: outstandingOrders } = await supabase
+        .from('orders')
+        .select('amount_outstanding');
+
+      const outstanding = (outstandingOrders || []).reduce((sum, o) => sum + Number(o.amount_outstanding || 0), 0);
+
+      // D. Count of orders in progress
+      const { data: progressOrders } = await supabase
+        .from('orders')
+        .select('id')
+        .eq('status', 'in_progress');
+
       return {
-        todayAppointmentsCount: 3,
-        nextAppointmentTime: '11:30 AM',
-        thisMonthRevenue: 245000,
-        totalOutstandingDues: 85600,
-        ordersInProgressCount: 18
+        todayAppointmentsCount: apptsToday?.length || 0,
+        nextAppointmentTime: nextTime,
+        thisMonthRevenue: monthlyRev,
+        totalOutstandingDues: outstanding,
+        ordersInProgressCount: progressOrders?.length || 0
       };
-    },
-    initialData: { todayAppointmentsCount: 3, nextAppointmentTime: '11:30 AM', thisMonthRevenue: 245000, totalOutstandingDues: 85600, ordersInProgressCount: 18 }
+    }
   });
 
   // Query 2: Fetch Today's Timeline Calendars List
-  const { data: appointments } = useQuery<AppointmentItemFeed[]>({
+  const { data: appointments = [] } = useQuery<AppointmentItemFeed[]>({
     queryKey: ['dashboard-appointments-today'],
     queryFn: async () => {
-      return [
-        { id: '1', customerName: 'Rohan Malhotra', timeSlot: '11:30 AM', stage: 'Trial 1', orderNumber: 'ORD-202606-0012' },
-        { id: '2', customerName: 'Aditi Rao', timeSlot: '02:15 PM', stage: 'Final Fitting', orderNumber: 'ORD-202605-0094' },
-        { id: '3', customerName: 'Vikram Seth', timeSlot: '04:45 PM', stage: 'Initial Measurement' }
-      ];
-    },
-    initialData: [
-      { id: '1', customerName: 'Rohan Malhotra', timeSlot: '11:30 AM', stage: 'Trial 1', orderNumber: 'ORD-202606-0012' },
-      { id: '2', customerName: 'Aditi Rao', timeSlot: '02:15 PM', stage: 'Final Fitting', orderNumber: 'ORD-202605-0094' },
-      { id: '3', customerName: 'Vikram Seth', timeSlot: '04:45 PM', stage: 'Initial Measurement' }
-    ]
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const endOfToday = new Date();
+      endOfToday.setHours(23, 59, 59, 999);
+
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('*, customers(full_name, name), orders(order_number)')
+        .gte('scheduled_date', startOfToday.toISOString())
+        .lte('scheduled_date', endOfToday.toISOString())
+        .order('scheduled_date', { ascending: true });
+
+      if (error) throw error;
+
+      return (data || []).map((a: any) => ({
+        id: a.id,
+        customerName: a.customers?.full_name || a.customers?.name || 'Unknown Client',
+        timeSlot: a.time_slot || 'Flexible',
+        stage: a.stage ? a.stage.replace('_', ' ') : 'Intake Consultation',
+        orderNumber: a.orders?.order_number || undefined
+      }));
+    }
   });
 
   // Query 3: Fetch Last 5 Created Orders Overview
-  const { data: recentOrders } = useQuery<OrderItemFeed[]>({
+  const { data: recentOrders = [] } = useQuery<OrderItemFeed[]>({
     queryKey: ['dashboard-orders-recent'],
     queryFn: async () => {
-      return [
-        { id: '101', orderNumber: 'ORD-202606-0042', customerName: 'Priya Sharma', itemName: 'Banarasi Lehenga', status: 'ready', amountOutstanding: 45000, deliveryDate: '18 Jun' },
-        { id: '102', orderNumber: 'ORD-202606-0041', customerName: 'Arjun Kapoor', itemName: 'Tuxedo Jacket', status: 'in_progress', amountOutstanding: 12000, deliveryDate: '30 Jun' },
-        { id: '103', orderNumber: 'ORD-202606-0040', customerName: 'Meera Nair', itemName: 'Silk Blouse (3)', status: 'delivered', amountOutstanding: 0, deliveryDate: '05 Jun' },
-        { id: '104', orderNumber: 'ORD-202606-0039', customerName: 'Kabir Singh', itemName: 'Casual Blazers', status: 'pending', amountOutstanding: 22000, deliveryDate: '02 Jul' }
-      ];
-    },
-    initialData: [
-      { id: '101', orderNumber: 'ORD-202606-0042', customerName: 'Priya Sharma', itemName: 'Banarasi Lehenga', status: 'ready', amountOutstanding: 45000, deliveryDate: '18 Jun' },
-      { id: '102', orderNumber: 'ORD-202606-0041', customerName: 'Arjun Kapoor', itemName: 'Tuxedo Jacket', status: 'in_progress', amountOutstanding: 12000, deliveryDate: '30 Jun' },
-      { id: '103', orderNumber: 'ORD-202606-0040', customerName: 'Meera Nair', itemName: 'Silk Blouse (3)', status: 'delivered', amountOutstanding: 0, deliveryDate: '05 Jun' },
-      { id: '104', orderNumber: 'ORD-202606-0039', customerName: 'Kabir Singh', itemName: 'Casual Blazers', status: 'pending', amountOutstanding: 22000, deliveryDate: '02 Jul' }
-    ]
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*, customers(full_name, name)')
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (error) throw error;
+
+      return (data || []).map((o: any) => ({
+        id: o.id,
+        orderNumber: o.order_number,
+        customerName: o.customers?.full_name || o.customers?.name || 'Unknown Client',
+        itemName: o.description || 'Custom Garment Assignment',
+        status: o.status,
+        amountOutstanding: Number(o.amount_outstanding || 0),
+        deliveryDate: o.delivery_date 
+          ? new Date(o.delivery_date).toLocaleDateString('en-IN', {day: 'numeric', month: 'short'}) 
+          : 'Continuous'
+      }));
+    }
   });
 
   return (
@@ -112,7 +170,7 @@ export default function DashboardPage() {
           </button>
           <button 
             onClick={() => router.push('/dashboard/measurements/new')}
-            className="flex-1 sm:flex-initial min-h-[44px] px-6 py-3 bg-primary text-white text-xs font-semibold tracking-wider hover:bg-opacity-90 transition-opacity uppercase"
+            className="flex-1 sm:flex-initial min-h-[44px] px-6 py-3 bg-primary text-white text-xs font-semibold tracking-wider hover:bg-opacity-95 transition-opacity uppercase"
           >
             Record Measurement
           </button>
@@ -126,7 +184,7 @@ export default function DashboardPage() {
           <p className="font-serif text-3xl font-bold text-primary">{stats.todayAppointmentsCount}</p>
           <div className="mt-4 text-on-surface-variant text-xs flex items-center">
             <span className="material-symbols-outlined text-sm mr-1">schedule</span>
-            Next fitting at {stats.nextAppointmentTime}
+            {stats.nextAppointmentTime ? `Next fitting at ${stats.nextAppointmentTime}` : 'No remaining schedules today'}
           </div>
         </div>
 
@@ -184,7 +242,7 @@ export default function DashboardPage() {
                   </div>
                   <p className="text-sm font-bold text-primary">{appt.customerName}</p>
                   <p className="text-xs text-on-surface-variant">
-                    {appt.stage} {appt.orderNumber ? `(${appt.orderNumber.substring(11)})` : ''}
+                    {appt.stage} {appt.orderNumber ? `(${appt.orderNumber})` : ''}
                   </p>
                 </div>
               ))
@@ -221,28 +279,34 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody className="text-xs divide-y divide-outline-variant">
-                {recentOrders.map((order) => (
-                  <tr 
-                    key={order.id}
-                    onClick={() => router.push(`/dashboard/orders/${order.id}`)}
-                    className="hover:bg-surface-container-low transition-colors cursor-pointer group zebra-row"
-                  >
-                    <td className="px-6 py-4 font-medium text-on-surface-variant">{order.orderNumber}</td>
-                    <td className="px-6 py-4 font-bold text-primary">{order.customerName}</td>
-                    <td className="px-6 py-4 text-on-surface">{order.itemName}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold tracking-wider uppercase ${
-                        order.status === 'ready' ? 'bg-secondary-container text-on-secondary-container' :
-                        order.status === 'delivered' ? 'bg-status-paid text-white' : 'bg-surface-container-highest text-on-surface-variant'
-                      }`}>
-                        {order.status === 'ready' ? 'Ready for Trial' : order.status.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td className={`px-6 py-4 text-right font-bold ${order.amountOutstanding > 0 ? 'text-status-due' : 'text-status-paid'}`}>
-                      {order.amountOutstanding > 0 ? `₹${order.amountOutstanding.toLocaleString('en-IN')}` : 'Settled'}
-                    </td>
+                {recentOrders.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="p-6 text-sm text-center text-ink-muted">No orders registered</td>
                   </tr>
-                ))}
+                ) : (
+                  recentOrders.map((order) => (
+                    <tr 
+                      key={order.id}
+                      onClick={() => router.push(`/dashboard/orders/${order.id}`)}
+                      className="hover:bg-surface-container-low transition-colors cursor-pointer group zebra-row"
+                    >
+                      <td className="px-6 py-4 font-medium text-on-surface-variant">{order.orderNumber}</td>
+                      <td className="px-6 py-4 font-bold text-primary">{order.customerName}</td>
+                      <td className="px-6 py-4 text-on-surface truncate max-w-[200px]">{order.itemName}</td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold tracking-wider uppercase ${
+                          order.status === 'ready' ? 'bg-secondary-container text-on-secondary-container' :
+                          order.status === 'delivered' ? 'bg-status-paid text-white' : 'bg-surface-container-highest text-on-surface-variant'
+                        }`}>
+                          {order.status === 'ready' ? 'Ready for Trial' : order.status.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td className={`px-6 py-4 text-right font-bold ${order.amountOutstanding > 0 ? 'text-status-due' : 'text-status-paid'}`}>
+                        {order.amountOutstanding > 0 ? `₹${order.amountOutstanding.toLocaleString('en-IN')}` : 'Settled'}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

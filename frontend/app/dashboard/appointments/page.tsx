@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase';
+import { useAuthStore } from '@/store/authStore';
 
 interface AppointmentItem {
   id: string;
@@ -21,6 +22,7 @@ interface AppointmentItem {
 
 export default function AppointmentCalendarPage() {
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
   
   // View Toggle State: 'list' or 'calendar'
   const [viewType, setViewType] = useState<'list' | 'calendar'>('list');
@@ -40,15 +42,59 @@ export default function AppointmentCalendarPage() {
   const [notesText, setNotesText] = useState('');
   const [mutationError, setMutationError] = useState<string | null>(null);
 
-  // TanStack Query: Fetch Appointments Data Tree Set
+  // Fetch Appointments from Supabase
   const { data: appointments = [], isLoading } = useQuery<AppointmentItem[]>({
     queryKey: ['appointments-master-list'],
     queryFn: async () => {
-      return [
-        { id: 'ap1', customer_id: 'c1', customer_name: 'Rohan Malhotra', customer_phone: '9811223344', order_number: 'ORD-202606-0012', title: 'Sherwani First Trial Fit Checks', appointment_type: 'linked_to_order', stage: 'trial_1', scheduled_date: '2026-06-15', time_slot: '11:30 AM', status: 'scheduled', notes: 'Verify sleeve lengths specifically with shirts worn.' },
-        { id: 'ap2', customer_id: 'c2', customer_name: 'Aditi Rao', customer_phone: '9988776655', order_number: 'ORD-202605-0094', title: 'Evening Gown Final Alteration Checks', appointment_type: 'linked_to_order', stage: 'final_fitting', scheduled_date: '2026-06-15', time_slot: '02:15 PM', status: 'scheduled', notes: null },
-        { id: 'ap3', customer_id: 'c3', customer_name: 'Vikram Seth', customer_phone: '9123456789', order_number: null, title: 'Bespoke Suit Fabric Intake Measurement', appointment_type: 'walk_in', stage: null, scheduled_date: '2026-06-16', time_slot: '04:45 PM', status: 'scheduled', notes: 'Walk-in reference consultation file entry.' }
-      ];
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('*, customers(full_name, name, phone), orders(order_number)')
+        .order('scheduled_date', { ascending: true });
+        
+      if (error) throw new Error(error.message);
+      
+      return (data || []).map((appt: any) => ({
+        id: appt.id,
+        customer_id: appt.customer_id,
+        customer_name: appt.customers?.full_name || appt.customers?.name || 'Unknown Client',
+        customer_phone: appt.customers?.phone || '',
+        order_number: appt.orders?.order_number || null,
+        title: appt.title,
+        appointment_type: appt.appointment_type,
+        stage: appt.stage,
+        scheduled_date: appt.scheduled_date || appt.appointment_date,
+        time_slot: appt.time_slot,
+        status: appt.status || 'scheduled',
+        notes: appt.notes
+      }));
+    }
+  });
+
+  // Fetch Customers for select dropdown
+  const { data: customerList = [] } = useQuery({
+    queryKey: ['appointments-customer-select'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('id, full_name, name, phone')
+        .order('full_name', { ascending: true });
+        
+      if (error) throw error;
+      return data || [];
+    }
+  });
+
+  // Fetch Orders for select dropdown
+  const { data: orderList = [] } = useQuery({
+    queryKey: ['appointments-order-select'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id, order_number, customers(full_name, name)')
+        .order('created_at', { ascending: false });
+        
+      if (error) throw error;
+      return data || [];
     }
   });
 
@@ -73,9 +119,11 @@ export default function AppointmentCalendarPage() {
         appointment_type: linkToOrder ? 'linked_to_order' : 'walk_in',
         stage: linkToOrder ? fittingStage : null,
         scheduled_date: scheduledDate,
+        appointment_date: scheduledDate,
         time_slot: timeSlotText || null,
         notes: notesText || null,
-        status: 'scheduled'
+        status: 'scheduled',
+        vendor_id: user?.vendorId || 'd290f1ee-6c54-4b01-90e6-d701748f0851'
       };
 
       const { data, error } = await supabase.from('appointments').insert([payload]).select();
@@ -99,7 +147,7 @@ export default function AppointmentCalendarPage() {
       <section className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 border-b border-outline-variant pb-4">
         <div>
           <h2 className="font-serif text-2xl lg:text-3xl font-bold text-primary">Fitting Schedules</h2>
-          <p className="text-sm text-on-surface-variant">Track month-long client outfit trials and fitting checkpoints[cite: 2, 36].</p>
+          <p className="text-sm text-on-surface-variant">Track month-long client outfit trials and fitting checkpoints.</p>
         </div>
         <button
           onClick={() => setIsFormOpen(true)}
@@ -218,16 +266,18 @@ export default function AppointmentCalendarPage() {
                 <label className="block font-bold text-on-surface-variant uppercase">Assign Customer Profile *</label>
                 <select required value={selectedCustomerId} onChange={(e) => setSelectedCustomerId(e.target.value)} className="w-full min-h-[44px] px-2 bg-surface-container-low border border-outline-variant">
                   <option value="">-- Select active profile --</option>
-                  <option value="c1">Rohan Malhotra (9811223344)</option>
-                  <option value="c2">Aditi Rao (9988776655)</option>
-                  <option value="c3">Vikram Seth (9123456789)</option>
+                  {customerList.map((cust: any) => (
+                    <option key={cust.id} value={cust.id}>
+                      {cust.full_name || cust.name} ({cust.phone})
+                    </option>
+                  ))}
                 </select>
               </div>
 
               <div className="flex items-center justify-between p-2 bg-zinc-50 border border-zinc-100">
                 <div>
                   <label className="block font-bold text-primary uppercase">Link to Existing Order Invoice?</label>
-                  <p className="text-[10px] text-ink-muted">Enables step-by-step tailored production pipeline tracking[cite: 2].</p>
+                  <p className="text-[10px] text-ink-muted">Enables step-by-step tailored production pipeline tracking.</p>
                 </div>
                 <input type="checkbox" checked={linkToOrder} onChange={(e) => setLinkToOrder(e.target.checked)} className="h-5 w-5 border-outline-variant text-primary focus:ring-primary cursor-pointer" />
               </div>
@@ -238,8 +288,11 @@ export default function AppointmentCalendarPage() {
                     <label className="block font-bold text-on-surface-variant uppercase">Select Order</label>
                     <select value={selectedOrderId} onChange={(e) => setSelectedOrderId(e.target.value)} className="w-full min-h-[44px] px-2 bg-surface-container-low border border-outline-variant">
                       <option value="">-- Select active ID --</option>
-                      <option value="o1">ORD-202606-0012</option>
-                      <option value="o2">ORD-202605-0094</option>
+                      {orderList.map((order: any) => (
+                        <option key={order.id} value={order.id}>
+                          {order.order_number} ({order.customers?.full_name || order.customers?.name || 'Unknown'})
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div className="space-y-1">

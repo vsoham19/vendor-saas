@@ -4,6 +4,7 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase';
+import { useAuthStore } from '@/store/authStore';
 
 interface CustomerListItem {
   id: string;
@@ -17,6 +18,7 @@ function CustomerListContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
   
   // Local UI States
   const [searchQuery, setSearchQuery] = useState('');
@@ -40,15 +42,22 @@ function CustomerListContent() {
   const { data: customers = [], isLoading } = useQuery<CustomerListItem[]>({
     queryKey: ['customers-list'],
     queryFn: async () => {
-      // In production, your middleware appends req.user context safely.
-      // For frontend independence, we simulate the database view return format:
-      return [
-        { id: 'c1', full_name: 'Priya Sharma', phone: '9810012345', total_outstanding: 45000.00, active_orders_count: 1 },
-        { id: 'c2', full_name: 'Arjun Kapoor', phone: '9871122334', total_outstanding: 12000.00, active_orders_count: 1 },
-        { id: 'c3', full_name: 'Meera Nair', phone: '9999887766', total_outstanding: 0.00, active_orders_count: 0 },
-        { id: 'c4', full_name: 'Kabir Singh', phone: '9111223344', total_outstanding: 22000.00, active_orders_count: 2 },
-        { id: 'c5', full_name: 'Ananya Desai', phone: '9845011223', total_outstanding: 0.00, active_orders_count: 0 }
-      ];
+      const { data, error } = await supabase
+        .from('customers')
+        .select('*, orders(id, status)')
+        .order('full_name', { ascending: true });
+        
+      if (error) throw new Error(error.message);
+      
+      return (data || []).map((customer: any) => ({
+        id: customer.id,
+        full_name: customer.full_name || customer.name,
+        phone: customer.phone,
+        total_outstanding: Number(customer.total_outstanding || 0),
+        active_orders_count: (customer.orders || []).filter(
+          (o: any) => o.status !== 'delivered' && o.status !== 'cancelled'
+        ).length
+      }));
     }
   });
 
@@ -65,7 +74,12 @@ function CustomerListContent() {
       // Actual Supabase dynamic execution pipeline matches constraints cleanly
       const { data, error } = await supabase
         .from('customers')
-        .insert([payload])
+        .insert([{
+          full_name: payload.full_name,
+          name: payload.full_name,
+          phone: payload.phone,
+          vendor_id: user?.vendorId || 'd290f1ee-6c54-4b01-90e6-d701748f0851'
+        }])
         .select();
       
       if (error) throw new Error(error.message);

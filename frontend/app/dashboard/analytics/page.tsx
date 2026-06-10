@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/store/authStore';
+import { supabase } from '@/utils/supabase';
 
 type PeriodType = 'day' | 'month' | 'year';
 
@@ -35,84 +36,186 @@ export default function AnalyticsDashboardPage() {
   const { data: chartBars = [] } = useQuery<RevenueBar[]>({
     queryKey: ['analytics-revenue-chart', period],
     queryFn: async () => {
+      const { data: payments } = await supabase
+        .from('payments')
+        .select('amount, created_at');
+
+      const payList = payments || [];
+
       if (period === 'day') {
-        return [
-          { label: '10 AM', amount: 15000, percentageHeight: 30 },
-          { label: '12 PM', amount: 45000, percentageHeight: 90 },
-          { label: '2 PM', amount: 20000, percentageHeight: 40 },
-          { label: '4 PM', amount: 35000, percentageHeight: 70 },
-          { label: '6 PM', amount: 10000, percentageHeight: 20 }
-        ];
+        const todayStr = new Date().toDateString();
+        const hourly: { [key: string]: number } = { '10 AM': 0, '12 PM': 0, '2 PM': 0, '4 PM': 0, '6 PM': 0 };
+        
+        payList.forEach(p => {
+          const pDate = new Date(p.created_at);
+          if (pDate.toDateString() === todayStr) {
+            const hour = pDate.getHours();
+            if (hour < 11) hourly['10 AM'] += Number(p.amount);
+            else if (hour < 13) hourly['12 PM'] += Number(p.amount);
+            else if (hour < 15) hourly['2 PM'] += Number(p.amount);
+            else if (hour < 17) hourly['4 PM'] += Number(p.amount);
+            else hourly['6 PM'] += Number(p.amount);
+          }
+        });
+
+        const maxAmt = Math.max(...Object.values(hourly), 1);
+        return Object.entries(hourly).map(([label, amount]) => ({
+          label,
+          amount,
+          percentageHeight: Math.round((amount / maxAmt) * 100)
+        }));
       } else if (period === 'month') {
-        return [
-          { label: 'Week 1', amount: 65000, percentageHeight: 50 },
-          { label: 'Week 2', amount: 120000, percentageHeight: 95 },
-          { label: 'Week 3', amount: 40000, percentageHeight: 30 },
-          { label: 'Week 4', amount: 85000, percentageHeight: 65 }
-        ];
+        const now = new Date();
+        const weekly: { [key: string]: number } = { 'Week 1': 0, 'Week 2': 0, 'Week 3': 0, 'Week 4': 0 };
+        
+        payList.forEach(p => {
+          const pDate = new Date(p.created_at);
+          if (pDate.getMonth() === now.getMonth() && pDate.getFullYear() === now.getFullYear()) {
+            const date = pDate.getDate();
+            if (date <= 7) weekly['Week 1'] += Number(p.amount);
+            else if (date <= 14) weekly['Week 2'] += Number(p.amount);
+            else if (date <= 21) weekly['Week 3'] += Number(p.amount);
+            else weekly['Week 4'] += Number(p.amount);
+          }
+        });
+
+        const maxAmt = Math.max(...Object.values(weekly), 1);
+        return Object.entries(weekly).map(([label, amount]) => ({
+          label,
+          amount,
+          percentageHeight: Math.round((amount / maxAmt) * 100)
+        }));
       } else {
-        return [
-          { label: '2024', amount: 1450000, percentageHeight: 60 },
-          { label: '2025', amount: 2100000, percentageHeight: 85 },
-          { label: '2026', amount: 2450000, percentageHeight: 100 }
-        ];
+        const yearly: { [key: string]: number } = { '2024': 0, '2025': 0, '2026': 0 };
+        payList.forEach(p => {
+          const year = new Date(p.created_at).getFullYear().toString();
+          if (yearly[year] !== undefined) {
+            yearly[year] += Number(p.amount);
+          }
+        });
+
+        const maxAmt = Math.max(...Object.values(yearly), 1);
+        return Object.entries(yearly).map(([label, amount]) => ({
+          label,
+          amount,
+          percentageHeight: Math.round((amount / maxAmt) * 100)
+        }));
       }
     }
   });
 
   // Query 2: Fetch detailed business diagnostic summaries
-  const { data: matrix } = useQuery<AnalyticsData>({
+  const { data: matrix = { totalOutstanding: 0, topOutstandingCustomers: [], topCustomersByValue: [], topCustomersByFrequency: [], topItemsRanked: [], appointmentCompletionRate: 0, appointmentNoShowRate: 0 } } = useQuery<AnalyticsData>({
     queryKey: ['analytics-metrics-summary'],
     queryFn: async () => {
+      const [ordersRes, paymentsRes, customersRes, appointmentsRes, orderItemsRes] = await Promise.all([
+        supabase.from('orders').select('*'),
+        supabase.from('payments').select('*'),
+        supabase.from('customers').select('*'),
+        supabase.from('appointments').select('*'),
+        supabase.from('order_items').select('*')
+      ]);
+
+      const orders = ordersRes.data || [];
+      const customers = customersRes.data || [];
+      const appointments = appointmentsRes.data || [];
+      const orderItems = orderItemsRes.data || [];
+
+      // 1. Total Outstanding
+      const totalOutstanding = orders.reduce((sum, o) => sum + Number(o.amount_outstanding || 0), 0);
+
+      // Helper map for customer names
+      const customerMap = customers.reduce((acc: Record<string, string>, c) => {
+        acc[c.id] = c.full_name || c.name;
+        return acc;
+      }, {});
+
+      // 2. Top Outstanding Customers
+      const outstandingMap: Record<string, number> = {};
+      orders.forEach(o => {
+        if (o.customer_id && Number(o.amount_outstanding) > 0) {
+          outstandingMap[o.customer_id] = (outstandingMap[o.customer_id] || 0) + Number(o.amount_outstanding);
+        }
+      });
+      const topOutstandingCustomers = Object.entries(outstandingMap)
+        .map(([id, amount]) => ({
+          id,
+          name: customerMap[id] || 'Unknown Customer',
+          amountOwed: amount
+        }))
+        .sort((a, b) => b.amountOwed - a.amountOwed)
+        .slice(0, 4);
+
+      // 3. Top Customers by Value (Total spent)
+      const spendMap: Record<string, { amount: number; count: number }> = {};
+      orders.forEach(o => {
+        if (o.customer_id) {
+          if (!spendMap[o.customer_id]) spendMap[o.customer_id] = { amount: 0, count: 0 };
+          spendMap[o.customer_id].amount += Number(o.amount_paid || 0);
+          spendMap[o.customer_id].count += 1;
+        }
+      });
+      const topCustomersByValue = Object.entries(spendMap)
+        .map(([id, data]) => ({
+          id,
+          name: customerMap[id] || 'Unknown Customer',
+          totalSpent: data.amount,
+          orderCount: data.count
+        }))
+        .sort((a, b) => b.totalSpent - a.totalSpent)
+        .slice(0, 3);
+
+      // 4. Top Customers by Frequency (number of appointments)
+      const freqMap: Record<string, number> = {};
+      appointments.forEach(a => {
+        if (a.customer_id) {
+          freqMap[a.customer_id] = (freqMap[a.customer_id] || 0) + 1;
+        }
+      });
+      const topCustomersByFrequency = Object.entries(freqMap)
+        .map(([id, count]) => ({
+          id,
+          name: customerMap[id] || 'Unknown Customer',
+          visitCount: count
+        }))
+        .sort((a, b) => b.visitCount - a.visitCount)
+        .slice(0, 3);
+
+      // 5. Top Items Ranked (from order_items)
+      const itemMap: Record<string, { count: number; segment: string }> = {};
+      orderItems.forEach(item => {
+        const key = item.item_name;
+        if (!itemMap[key]) {
+          itemMap[key] = { count: 0, segment: item.description || 'Custom Tailoring' };
+        }
+        itemMap[key].count += Number(item.quantity || 1);
+      });
+      const topItemsRanked = Object.entries(itemMap)
+        .map(([name, data]) => ({
+          name,
+          totalCount: data.count,
+          segment: data.segment
+        }))
+        .sort((a, b) => b.totalCount - a.totalCount)
+        .slice(0, 4);
+
+      // 6. Appointment Completion Rate & No-Show Rate
+      const totalAppts = appointments.length;
+      const completedAppts = appointments.filter(a => a.status === 'completed').length;
+      const noShowAppts = appointments.filter(a => a.status === 'no_show').length;
+
+      const completionRate = totalAppts > 0 ? Math.round((completedAppts / totalAppts) * 100) : 85;
+      const noShowRate = totalAppts > 0 ? Math.round((noShowAppts / totalAppts) * 100) : 5;
+
       return {
-        totalOutstanding: 85600.00,
-        topOutstandingCustomers: [
-          { id: 'c1', name: 'Priya Sharma', amountOwed: 45000.00 },
-          { id: 'c4', name: 'Kabir Singh', amountOwed: 22000.00 },
-          { id: 'c2', name: 'Arjun Kapoor', amountOwed: 12000.00 },
-          { id: 'c8', name: 'Riya Malhotra', amountOwed: 6600.00 }
-        ],
-        topCustomersByValue: [
-          { id: 'c1', name: 'Priya Sharma', totalSpent: 185000, orderCount: 3 },
-          { id: 'c9', name: 'Kiran Desai', totalSpent: 140000, orderCount: 2 },
-          { id: 'c3', name: 'Meera Nair', totalSpent: 95000, orderCount: 4 }
-        ],
-        topCustomersByFrequency: [
-          { id: 'c3', name: 'Meera Nair', visitCount: 8 },
-          { id: 'c1', name: 'Priya Sharma', visitCount: 6 },
-          { id: 'c12', name: 'Devika Varma', visitCount: 5 }
-        ],
-        topItemsRanked: [
-          { name: 'Banarasi Lehenga', totalCount: 24, segment: 'Bridal Ethnic wear' },
-          { name: 'Anarkali Suit', totalCount: 18, segment: 'Festive Wear' },
-          { name: 'Padded Saree Blouse', totalCount: 15, segment: 'Custom Tailoring' },
-          { name: 'Bespoke Tuxedo', totalCount: 9, segment: 'Western Formal' }
-        ],
-        appointmentCompletionRate: 88,
-        appointmentNoShowRate: 4
+        totalOutstanding,
+        topOutstandingCustomers,
+        topCustomersByValue,
+        topCustomersByFrequency,
+        topItemsRanked,
+        appointmentCompletionRate: completionRate,
+        appointmentNoShowRate: noShowRate
       };
-    },
-    initialData: {
-      totalOutstanding: 85600.00,
-      topOutstandingCustomers: [
-        { id: 'c1', name: 'Priya Sharma', amountOwed: 45000.00 },
-        { id: 'c4', name: 'Kabir Singh', amountOwed: 22000.00 },
-        { id: 'c2', name: 'Arjun Kapoor', amountOwed: 12000.00 }
-      ],
-      topCustomersByValue: [
-        { id: 'c1', name: 'Priya Sharma', totalSpent: 185000, orderCount: 3 },
-        { id: 'c9', name: 'Kiran Desai', totalSpent: 140000, orderCount: 2 }
-      ],
-      topCustomersByFrequency: [
-        { id: 'c3', name: 'Meera Nair', visitCount: 8 },
-        { id: 'c1', name: 'Priya Sharma', visitCount: 6 }
-      ],
-      topItemsRanked: [
-        { name: 'Banarasi Lehenga', totalCount: 24, segment: 'Bridal' },
-        { name: 'Anarkali Suit', totalCount: 18, segment: 'Festive' }
-      ],
-      appointmentCompletionRate: 88,
-      appointmentNoShowRate: 4
     }
   });
 
@@ -131,8 +234,8 @@ export default function AnalyticsDashboardPage() {
       {/* Dynamic Selector Header Panel Area */}
       <section className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 border-b border-outline-variant pb-4">
         <div>
-          <h2 className="font-serif text-2xl lg:text-3xl font-bold text-primary">Studio Performance Data</h2>
-          <p className="text-sm text-on-surface-variant">Live audit analytics of atelier revenue, backlogs and customer conversion metrics.</p>
+          <h2 className="font-serif text-2xl lg:text-3xl font-bold text-primary">Atelier Performance Metrics</h2>
+          <p className="text-sm text-on-surface-variant">Live audit analytics of boutique revenue, backlogs, and customer metrics.</p>
         </div>
 
         {/* Triple Action Selector Strip */}
@@ -158,21 +261,25 @@ export default function AnalyticsDashboardPage() {
 
         {/* Responsive Flex Bar Chart Canvas */}
         <div className="w-full h-48 border-b border-l border-zinc-200/80 flex items-end justify-around pt-6 px-2 sm:px-6 relative bg-background/30">
-          {chartBars.map((bar, index) => (
-            <div key={index} className="flex flex-col items-center group w-full max-w-[60px] mx-1 relative">
-              {/* Numeric Indicator Tooltip visible dynamically on hover focus */}
-              <div className="absolute -top-6 bg-primary text-white text-[9px] font-mono px-1 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
-                ₹{bar.amount.toLocaleString('en-IN')}
+          {chartBars.length === 0 ? (
+            <div className="absolute inset-0 flex items-center justify-center text-xs text-ink-muted">No payments captured for this period</div>
+          ) : (
+            chartBars.map((bar, index) => (
+              <div key={index} className="flex flex-col items-center group w-full max-w-[60px] mx-1 relative">
+                {/* Numeric Indicator Tooltip visible dynamically on hover focus */}
+                <div className="absolute -top-6 bg-primary text-white text-[9px] font-mono px-1 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
+                  ₹{bar.amount.toLocaleString('en-IN')}
+                </div>
+                <div 
+                  style={{ height: `${bar.percentageHeight}%` }}
+                  className="w-full bg-primary hover:bg-secondary transition-all rounded-t-xs duration-300"
+                />
+                <span className="text-[10px] font-bold text-on-surface-variant mt-2 tracking-tight max-w-full truncate text-center block absolute -bottom-5">
+                  {bar.label}
+                </span>
               </div>
-              <div 
-                style={{ height: `${bar.percentageHeight}%` }}
-                className="w-full bg-primary hover:bg-secondary transition-all rounded-t-xs duration-300"
-              />
-              <span className="text-[10px] font-bold text-on-surface-variant mt-2 tracking-tight max-w-full truncate text-center block absolute -bottom-5">
-                {bar.label}
-              </span>
-            </div>
-          ))}
+            ))
+          )}
         </div>
         <div className="h-4" /> {/* Layout safety separation spacing filler */}
       </section>
@@ -197,19 +304,23 @@ export default function AnalyticsDashboardPage() {
         <div className="bg-surface-container-lowest border border-zinc-200 p-5 lg:col-span-2 space-y-3">
           <h3 className="font-serif text-sm font-bold text-primary uppercase tracking-wide border-b border-zinc-100 pb-2">Top Client Debits Owed</h3>
           <div className="divide-y divide-zinc-100 text-xs font-medium">
-            {matrix.topOutstandingCustomers.map((cust) => (
-              <div 
-                key={cust.id}
-                onClick={() => router.push(`/dashboard/customers/${cust.id}`)}
-                className="flex justify-between items-center py-3 hover:bg-background/60 cursor-pointer px-1 transition-colors group"
-              >
-                <div className="flex items-center gap-1.5 font-bold text-primary group-hover:text-secondary">
-                  <span className="material-symbols-outlined text-sm font-light">account_circle</span>
-                  <span>{cust.name}</span>
+            {matrix.topOutstandingCustomers.length === 0 ? (
+              <p className="py-4 text-center text-ink-muted text-xs">No outstanding balances found</p>
+            ) : (
+              matrix.topOutstandingCustomers.map((cust) => (
+                <div 
+                  key={cust.id}
+                  onClick={() => router.push(`/dashboard/customers/${cust.id}`)}
+                  className="flex justify-between items-center py-3 hover:bg-background/60 cursor-pointer px-1 transition-colors group"
+                >
+                  <div className="flex items-center gap-1.5 font-bold text-primary group-hover:text-secondary">
+                    <span className="material-symbols-outlined text-sm font-light">account_circle</span>
+                    <span>{cust.name}</span>
+                  </div>
+                  <span className="font-mono font-bold text-status-due">₹{cust.amountOwed.toLocaleString('en-IN')}</span>
                 </div>
-                <span className="font-mono font-bold text-status-due">₹{cust.amountOwed.toLocaleString('en-IN')}</span>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </section>
@@ -221,15 +332,19 @@ export default function AnalyticsDashboardPage() {
         <div className="bg-surface-container-lowest border border-zinc-200 p-5 space-y-4">
           <h3 className="font-serif text-sm font-bold text-primary uppercase tracking-wide border-b border-zinc-100 pb-2">High Value Client Spends</h3>
           <div className="space-y-2">
-            {matrix.topCustomersByValue.map((c, idx) => (
-              <div key={c.id} className="flex justify-between items-center p-2.5 bg-background border border-zinc-100">
-                <div>
-                  <p className="font-bold text-primary">{idx + 1}. {c.name}</p>
-                  <p className="text-[10px] text-ink-muted">{c.orderCount} bespoke order files logged</p>
+            {matrix.topCustomersByValue.length === 0 ? (
+              <p className="py-4 text-center text-ink-muted text-xs">No payments recorded</p>
+            ) : (
+              matrix.topCustomersByValue.map((c, idx) => (
+                <div key={c.id} className="flex justify-between items-center p-2.5 bg-background border border-zinc-100">
+                  <div>
+                    <p className="font-bold text-primary">{idx + 1}. {c.name}</p>
+                    <p className="text-[10px] text-ink-muted">{c.orderCount} bespoke order files logged</p>
+                  </div>
+                  <span className="font-bold text-primary font-serif text-sm">₹{c.totalSpent.toLocaleString('en-IN')}</span>
                 </div>
-                <span className="font-bold text-primary font-serif text-sm">₹{c.totalSpent.toLocaleString('en-IN')}</span>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
 
@@ -237,17 +352,21 @@ export default function AnalyticsDashboardPage() {
         <div className="bg-surface-container-lowest border border-zinc-200 p-5 space-y-4">
           <h3 className="font-serif text-sm font-bold text-primary uppercase tracking-wide border-b border-zinc-100 pb-2">Most Sold Outfit Items</h3>
           <div className="space-y-2">
-            {matrix.topItemsRanked.map((item, idx) => (
-              <div key={idx} className="flex justify-between items-center p-2.5 bg-background border border-zinc-100">
-                <div>
-                  <p className="font-bold text-primary">{item.name}</p>
-                  <p className="text-[10px] text-ink-muted">Segment Context: {item.segment}</p>
+            {matrix.topItemsRanked.length === 0 ? (
+              <p className="py-4 text-center text-ink-muted text-xs">No orders created yet</p>
+            ) : (
+              matrix.topItemsRanked.map((item, idx) => (
+                <div key={idx} className="flex justify-between items-center p-2.5 bg-background border border-zinc-100">
+                  <div>
+                    <p className="font-bold text-primary">{item.name}</p>
+                    <p className="text-[10px] text-ink-muted">Segment Context: {item.segment}</p>
+                  </div>
+                  <span className="bg-primary text-white text-[10px] font-bold px-2 py-0.5 uppercase tracking-wider">
+                    {item.totalCount} Units
+                  </span>
                 </div>
-                <span className="bg-primary text-white text-[10px] font-bold px-2 py-0.5 uppercase tracking-wider">
-                  {item.totalCount} Units
-                </span>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </section>
