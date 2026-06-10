@@ -162,7 +162,7 @@ export default function AppointmentCalendarPage() {
                   </div>
                   <h4 className="font-bold text-primary text-base">{appt.title}</h4>
                   <p className="text-xs text-on-surface-variant font-medium">Customer Profile: <span className="text-on-surface font-bold">{appt.customer_name}</span> ({appt.customer_phone})</p>
-                  {appt.notes && <p className="text-xs text-ink-muted italic pt-1">Memo: "{appt.notes}"</p>}
+                  {appt.notes && <p className="text-xs text-ink-muted italic pt-1">Memo: &quot;{appt.notes}&quot;</p>}
                 </div>
 
                 <div className="flex sm:flex-col items-start sm:items-end justify-between sm:justify-center gap-2 shrink-0">

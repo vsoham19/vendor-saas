@@ -122,7 +122,7 @@ export default function DashboardPage() {
       {/* Segment 2: 4-Column Metric Bento Summary Grid */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-surface-container-lowest p-6 border border-zinc-200 card-shadow">
-          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider mb-2">TODAY'S APPOINTMENTS</p>
+          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider mb-2">TODAY&apos;S APPOINTMENTS</p>
           <p className="font-serif text-3xl font-bold text-primary">{stats.todayAppointmentsCount}</p>
           <div className="mt-4 text-on-surface-variant text-xs flex items-center">
             <span className="material-symbols-outlined text-sm mr-1">schedule</span>
@@ -131,7 +131,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="bg-surface-container-lowest p-6 border border-zinc-200 card-shadow">
-          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider mb-2">THIS MONTH'S REVENUE</p>
+          <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider mb-2">THIS MONTH&apos;S REVENUE</p>
           <p className="font-serif text-3xl font-bold text-primary">₹{stats.thisMonthRevenue.toLocaleString('en-IN')}</p>
           <div className="mt-4 flex items-center text-status-paid text-xs font-medium">
             <span className="material-symbols-outlined text-sm mr-1">trending_up</span>
@@ -161,7 +161,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
         {/* Today's Appointments List Frame Block */}
         <div className="lg:col-span-1 space-y-4">
-          <h3 className="font-serif text-xl font-bold text-primary">Today's Appointments</h3>
+          <h3 className="font-serif text-xl font-bold text-primary">Today&apos;s Appointments</h3>
           <div className="bg-surface-container-lowest border border-zinc-200 divide-y divide-outline-variant">
             {appointments.length === 0 ? (
               <p className="p-6 text-sm text-center text-ink-muted">No appointments today</p>

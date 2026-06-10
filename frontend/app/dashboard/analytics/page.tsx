@@ -121,7 +121,7 @@ export default function AnalyticsDashboardPage() {
       <div className="p-8 text-center max-w-sm mx-auto space-y-3 bg-white border border-error/20 mt-12">
         <span className="material-symbols-outlined text-4xl text-error">lock</span>
         <h3 className="font-serif text-lg font-bold text-primary">Access Forbidden</h3>
-        <p className="text-xs text-on-surface-variant">Your user clearance profile role ('assistant') does not permit execution of analytics monitoring panels.</p>
+        <p className="text-xs text-on-surface-variant">Your user clearance profile role (&apos;assistant&apos;) does not permit execution of analytics monitoring panels.</p>
       </div>
     );
   }

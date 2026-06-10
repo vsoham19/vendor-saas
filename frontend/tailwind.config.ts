@@ -33,8 +33,8 @@ const config: Config = {
         "on-secondary-container": "#7a5037",
       },
       fontFamily: {
-        serif: ["Libre Caslon Text", "serif"],
-        sans: ["Inter", "sans-serif"],
+        serif: ["var(--font-libre-caslon)", "serif"],
+        sans: ["var(--font-inter)", "sans-serif"],
       },
       spacing: {
         unit: "4px",
