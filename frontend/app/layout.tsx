@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import "./globals.css";
-import Providers from "./providers"; // Import the core framework bundle
+import "./global.css";
+import Providers from "./provider"; // Import the core framework bundle
 
 export const metadata: Metadata = {
   title: "Artisan Ledger | The Atelier Dashboard",

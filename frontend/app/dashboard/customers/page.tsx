@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase';
 
@@ -13,8 +13,9 @@ interface CustomerListItem {
   active_orders_count: number;
 }
 
-export default function CustomerListPage() {
+function CustomerListContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   
   // Local UI States
@@ -23,6 +24,17 @@ export default function CustomerListPage() {
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Automatically open modal if add=true query parameter is present
+  useEffect(() => {
+    if (searchParams.get('add') === 'true') {
+      setIsModalOpen(true);
+      // Clean up the URL query parameters
+      const url = new URL(window.location.href);
+      url.searchParams.delete('add');
+      window.history.replaceState({}, '', url.pathname + url.search);
+    }
+  }, [searchParams]);
 
   // TanStack React Query v5: Fetch Vendor Customers
   const { data: customers = [], isLoading } = useQuery<CustomerListItem[]>({
@@ -189,4 +201,56 @@ export default function CustomerListPage() {
             </div>
 
             {formError && (
-              <div className="
+              <div className="p-3 bg-error-container text-on-error-container text-xs font-semibold border border-error/20 flex gap-2">
+                <span className="material-symbols-outlined text-sm shrink-0">error</span>
+                <p>{formError}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateCustomerSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold tracking-wider text-on-surface-variant uppercase">Full Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g., Priya Sharma"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  className="w-full min-h-[44px] px-3 bg-surface-container-low border border-outline-variant text-sm focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold tracking-wider text-on-surface-variant uppercase">Contact Phone *</label>
+                <input
+                  type="tel"
+                  required
+                  placeholder="e.g., 9810012345"
+                  value={newPhone}
+                  onChange={(e) => setNewPhone(e.target.value)}
+                  className="w-full min-h-[44px] px-3 bg-surface-container-low border border-outline-variant text-sm focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={createCustomerMutation.isPending}
+                className="w-full min-h-[44px] bg-primary text-white text-xs font-bold uppercase tracking-wider disabled:opacity-50 hover:bg-opacity-95 transition-all"
+              >
+                {createCustomerMutation.isPending ? 'Saving Record...' : 'Confirm Registration'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+export default function CustomerListPage() {
+  return (
+    <Suspense fallback={<div className="p-10 text-center text-sm text-on-surface-variant">Loading customers...</div>}>
+      <CustomerListContent />
+    </Suspense>
+  );
+}

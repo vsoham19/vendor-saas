@@ -105,7 +105,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex gap-4 w-full sm:w-auto">
           <button 
-            onClick={() => router.push('/dashboard/customers/create')}
+            onClick={() => router.push('/dashboard/customers?add=true')}
             className="flex-1 sm:flex-initial min-h-[44px] px-6 py-3 border border-secondary text-secondary text-xs font-semibold tracking-wider hover:bg-secondary-fixed transition-colors uppercase"
           >
             Add Customer
@@ -169,7 +169,7 @@ export default function DashboardPage() {
               appointments.map((appt, idx) => (
                 <div 
                   key={appt.id} 
-                  onClick={() => router.push(`/dashboard/appointments/${appt.id}`)}
+                  onClick={() => router.push('/dashboard/appointments')}
                   className={`p-4 transition-colors cursor-pointer ${
                     idx === 0 ? 'bg-secondary-fixed/30 border-l-4 border-l-secondary' : 'hover:bg-surface-container-low'
                   }`}

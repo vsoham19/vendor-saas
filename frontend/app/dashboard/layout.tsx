@@ -115,10 +115,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* Mobile Sticky Action Bottom Tab Bar Component Matrix */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-background border-t border-outline-variant grid grid-cols-5 h-16 z-50 text-center items-center">
-        {navigationLinks.slice(0, 5).map((link) => (
-          <Link 
-            key={link.href} 
-            href={link.href} 
-            className={`flex flex-col items-center justify-center text-xs h-full transition-all ${
-              pathname === link.href 
-                ? 'text-primary font-bold bg
+        {navigationLinks.slice(0, 5).map((link) => {
+          return (
+            <Link 
+              key={link.href} 
+              href={link.href} 
+              className={`flex flex-col items-center justify-center text-xs h-full transition-all ${
+                pathname === link.href 
+                  ? 'text-primary font-bold bg-surface-container-low' 
+                  : 'text-on-surface-variant hover:bg-surface-container-low'
+              }`}
+            >
+              <span className="material-symbols-outlined mb-1">{link.icon}</span>
+              <span className="text-[10px]">{link.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
+    </div>
+  );
+}
