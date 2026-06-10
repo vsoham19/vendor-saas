@@ -8,6 +8,11 @@ import { supabaseAdmin } from '../config/supabase';
  */
 export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Skip auth for public health routes
+    if (req.path === '/' || req.path.startsWith('/api/health')) {
+      return next();
+    }
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ 
@@ -18,21 +23,21 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
 
     const token = authHeader.split(' ')[1];
     
-    // Decompile and verify the client signature against Supabase identity records
+    // Verify the Supabase auth token
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
     
     if (authError || !user) {
       return res.status(401).json({ 
         error: 'Unauthorized', 
-        message: 'Signature token evaluation failed or profile has expired.' 
+        message: 'Token validation failed or session has expired.' 
       });
     }
 
-    // Map internal profile context matching this unique client identifier
+    // Look up the staff profile using auth_user_id
     const { data: staffMember, error: dbError } = await supabaseAdmin
       .from('staff')
       .select('vendor_id, role')
-      .eq('id', user.id)
+      .eq('auth_user_id', user.id)
       .single();
 
     if (dbError || !staffMember) {

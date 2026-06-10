@@ -6,7 +6,9 @@
   "scripts": {
     "build": "tsc --noEmit",
     "check": "tsc --noEmit",
-    "vercel-build": "npm run build"
+    "vercel-build": "npm run build",
+    "purge": "node purge.js",
+    "testdb": "node test_db.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.43.0",
