@@ -1,15 +1,14 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { requireAuth, requireOwner } from '../middleware/auth';
 import { supabaseAdmin } from '../config/supabase';
 
 const router = Router();
 
 /**
  * GET /api/analytics
- * Compiles structural ledger values, monthly financial turnovers, 
+ * Compiles structural ledger values, monthly financial turnovers,
  * and identifies high-frequency repeating customers inside isolated tenant parameters.
  */
-router.get('/', requireAuth, requireOwner, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const vendorId = req.vendorId;
 

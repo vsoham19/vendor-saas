@@ -1,5 +1,4 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { requireAuth } from '../middleware/auth';
 import { supabaseAdmin } from '../config/supabase';
 
 const router = Router();
@@ -8,7 +7,7 @@ const router = Router();
  * POST /api/customers
  * Registers a new customer profile under the active studio's isolated tenant scope.
  */
-router.post('/', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { name, phone, email } = req.body;
     const vendorId = req.vendorId;
@@ -34,7 +33,7 @@ router.post('/', requireAuth, async (req: Request, res: Response, next: NextFunc
  * GET /api/customers
  * Fetches the studio's full customer list with optional query lookups by name or phone.
  */
-router.get('/', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const vendorId = req.vendorId;
     const { search } = req.query;
@@ -62,7 +61,7 @@ router.get('/', requireAuth, async (req: Request, res: Response, next: NextFunct
  * GET /api/customers/:id
  * Compiles a deep profile aggregation across customer metadata, ledgers, measurements, and schedules.
  */
-router.get('/:id', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const vendorId = req.vendorId;

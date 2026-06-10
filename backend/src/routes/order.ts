@@ -1,5 +1,4 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { requireAuth } from '../middleware/auth';
 import { supabaseAdmin } from '../config/supabase';
 
 const router = Router();
@@ -8,7 +7,7 @@ const router = Router();
  * POST /api/orders
  * Generates an order entry and processes any partial upfront advance payments.
  */
-router.post('/', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { customer_id, total_amount, advance_amount, payment_method } = req.body;
     const vendorId = req.vendorId;
@@ -63,7 +62,7 @@ router.post('/', requireAuth, async (req: Request, res: Response, next: NextFunc
  * GET /api/orders/:id
  * Fetches an individual order file. Balances are returned exactly as calculated by database triggers.
  */
-router.get('/:id', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const vendorId = req.vendorId;
@@ -95,7 +94,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response, next: NextFu
  * POST /api/orders/:id/payments
  * Appends an immutable partial payment entry onto an active running ledger.
  */
-router.post('/:id/payments', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/payments', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const { amount, payment_method } = req.body;

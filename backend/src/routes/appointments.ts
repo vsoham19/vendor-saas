@@ -1,5 +1,4 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { requireAuth } from '../middleware/auth';
 import { supabaseAdmin } from '../config/supabase';
 
 const router = Router();
@@ -8,7 +7,7 @@ const router = Router();
  * POST /api/appointments
  * Pins a future fitting deadline or consultation session on the studio's calendar timeline.
  */
-router.post('/', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { customer_id, order_id, appointment_date, type, notes } = req.body;
     const vendorId = req.vendorId;
@@ -41,7 +40,7 @@ router.post('/', requireAuth, async (req: Request, res: Response, next: NextFunc
  * GET /api/appointments
  * Streams scheduling objects isolated inside this vendor partition for list and grid render engines.
  */
-router.get('/', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const vendorId = req.vendorId;
 
