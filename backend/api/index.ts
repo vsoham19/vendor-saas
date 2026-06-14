@@ -23,14 +23,16 @@ for (const key of requiredEnv) {
 
 const app = express();
 
-// Production‑ready CORS whitelist
+// Production‑ready CORS whitelist with wildcard support for Vercel preview/production domains
 const allowedOrigins = ['http://localhost:3000', 'https://vendor-saas.vercel.app'];
 app.use(
   cors({
     origin: (origin, callback) => {
       // Allow non‑browser requests (e.g., Postman) with no origin
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+      if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+        return callback(null, true);
+      }
       return callback(new Error('Not allowed by CORS'));
     },
     credentials: true,

@@ -33,6 +33,8 @@ export default function AtelierStudioSettingsPage() {
   const { user, token } = useAuthStore();
   const [sectionError, setSectionError] = useState<string | null>(null);
   const [sectionSuccess, setSectionSuccess] = useState<string | null>(null);
+  const [staffError, setStaffError] = useState<string | null>(null);
+  const [staffSuccess, setStaffSuccess] = useState<string | null>(null);
 
   // Form Field Local Temporary Capture Buffers
   const [newFieldName, setNewFieldName] = useState('');
@@ -177,7 +179,8 @@ export default function AtelierStudioSettingsPage() {
   // Mutation: Invite New Staff (calls backend API)
   const inviteStaffMutation = useMutation({
     mutationFn: async () => {
-      setSectionError(null);
+      setStaffError(null);
+      setStaffSuccess(null);
       if (!inviteName.trim() || !inviteEmail.trim() || !invitePassword.trim()) {
         throw new Error('Name, email, and password are all required.');
       }
@@ -214,10 +217,10 @@ export default function AtelierStudioSettingsPage() {
       setInviteName('');
       setInviteEmail('');
       setInvitePassword('');
-      setSectionSuccess('Assistant added successfully! They can now sign in.');
-      setTimeout(() => setSectionSuccess(null), 4000);
+      setStaffSuccess('Assistant added successfully! They can now sign in.');
+      setTimeout(() => setStaffSuccess(null), 4000);
     },
-    onError: (err: any) => setSectionError(err.message),
+    onError: (err: any) => setStaffError(err.message),
   });
 
   const handleStartEditBusiness = () => {
@@ -468,6 +471,18 @@ export default function AtelierStudioSettingsPage() {
                   {inviteStaffMutation.isPending ? 'Adding...' : 'Add Assistant'}
                 </button>
               </div>
+              {staffError && (
+                <p className="text-status-due text-xs font-bold mt-2 flex gap-1.5 items-center">
+                  <span className="material-symbols-outlined text-base shrink-0">error</span>
+                  <span>{staffError}</span>
+                </p>
+              )}
+              {staffSuccess && (
+                <p className="text-status-paid text-xs font-bold mt-2 flex gap-1.5 items-center">
+                  <span className="material-symbols-outlined text-base shrink-0">check_circle</span>
+                  <span>{staffSuccess}</span>
+                </p>
+              )}
             </div>
           </div>
         </div>

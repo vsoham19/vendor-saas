@@ -33,14 +33,19 @@ export default function AnalyticsDashboardPage() {
   const isOwner = user?.role === 'owner' || true; // Fallback helper during initial hydrate runs
 
   // Query 1: Fetch dynamic timeline chart tracking configurations
-  const { data: chartBars = [] } = useQuery<RevenueBar[]>({
+  const { data: chartBars = [], error: chartError } = useQuery<RevenueBar[]>({
     queryKey: ['analytics-revenue-chart', period, user?.vendorId],
     queryFn: async () => {
       if (!user?.vendorId) return [];
-      const { data: payments } = await supabase
+      const { data: payments, error } = await supabase
         .from('payments')
         .select('amount, created_at, customers!inner(vendor_id)')
         .eq('customers.vendor_id', user.vendorId);
+
+      if (error) {
+        console.error('Analytics chart query failed:', error);
+        throw error;
+      }
 
       const payList = payments || [];
 
@@ -108,7 +113,7 @@ export default function AnalyticsDashboardPage() {
   });
 
   // Query 2: Fetch detailed business diagnostic summaries
-  const { data: matrix = { totalOutstanding: 0, topOutstandingCustomers: [], topCustomersByValue: [], topCustomersByFrequency: [], topItemsRanked: [], appointmentCompletionRate: 0, appointmentNoShowRate: 0 } } = useQuery<AnalyticsData>({
+  const { data: matrix = { totalOutstanding: 0, topOutstandingCustomers: [], topCustomersByValue: [], topCustomersByFrequency: [], topItemsRanked: [], appointmentCompletionRate: 0, appointmentNoShowRate: 0 }, error: matrixError } = useQuery<AnalyticsData>({
     queryKey: ['analytics-metrics-summary', user?.vendorId],
     queryFn: async () => {
       if (!user?.vendorId) throw new Error('Not authenticated');
@@ -119,6 +124,12 @@ export default function AnalyticsDashboardPage() {
         supabase.from('appointments').select('*').eq('vendor_id', user.vendorId),
         supabase.from('order_items').select('*, orders!inner(vendor_id)').eq('orders.vendor_id', user.vendorId)
       ]);
+
+      if (ordersRes.error) throw new Error(`Orders Query: ${ordersRes.error.message}`);
+      if (paymentsRes.error) throw new Error(`Payments Query: ${paymentsRes.error.message}`);
+      if (customersRes.error) throw new Error(`Customers Query: ${customersRes.error.message}`);
+      if (appointmentsRes.error) throw new Error(`Appointments Query: ${appointmentsRes.error.message}`);
+      if (orderItemsRes.error) throw new Error(`Order Items Query: ${orderItemsRes.error.message}`);
 
       const orders = ordersRes.data || [];
       const customers = customersRes.data || [];
@@ -236,6 +247,20 @@ export default function AnalyticsDashboardPage() {
 
   return (
     <div className="space-y-8">
+      {chartError && (
+        <div className="p-4 bg-error-container text-on-error-container text-xs font-semibold border border-error/20 flex gap-2 animate-fadeIn">
+          <span className="material-symbols-outlined shrink-0 text-base">error</span>
+          <p>Chart Error: {chartError.message}</p>
+        </div>
+      )}
+
+      {matrixError && (
+        <div className="p-4 bg-error-container text-on-error-container text-xs font-semibold border border-error/20 flex gap-2 animate-fadeIn">
+          <span className="material-symbols-outlined shrink-0 text-base">error</span>
+          <p>Metrics Error: {matrixError.message}</p>
+        </div>
+      )}
+
       {/* Dynamic Selector Header Panel Area */}
       <section className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 border-b border-outline-variant pb-4">
         <div>
