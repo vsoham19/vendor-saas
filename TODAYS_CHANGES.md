@@ -124,6 +124,9 @@ Here is the exact index of files created or modified today:
 2. **`cleanup_mock_data.sql`** `[MODIFY]`
    * Setup database reset script. Added trigger recreation instructions and data repair routines.
 
+3. **`backend/scratch/seed_new_store.js`** `[NEW]`
+   * Automation seeding script using Supabase Admin client to programmatically reset and seed Sanskriti Couture store bridal lehenga & saree data (owner, assistant, templates, measurements, 10 customers, 18 orders, 10 appointments).
+
 ---
 
 ## 6. Deployment & Verification Steps
@@ -148,9 +151,19 @@ git commit -m "fix: integrated next api route for invite and interactive svg cha
 git push
 ```
 
-### Step 4: Verify the Features
-1. Go to your **Settings** page and add a new assistant (e.g. `soham@gmail.com`). Confirm a green success message appears and the assistant shows up in the staff table list.
-2. Complete an order and record payments. Go to the **Analytics** page to verify that:
-   * The Gross Revenue Chart displays gradient bars showing payment history.
-   * Hovering over the bars displays the exact amount.
-   * The Outstanding Dues ledger updates immediately.
+### Step 4: Access Sanskriti Couture Store (Lehengas & Sarees)
+You can now log in to the newly seeded boutique using the following credentials on the login screen:
+* **Owner Profile**:
+  * **Email**: `sanskriti@gmail.com`
+  * **Password**: `password123`
+* **Assistant Profile**:
+  * **Email**: `sanskriti_assistant@gmail.com`
+  * **Password**: `password123`
+
+### Step 5: Verify Seeding Details
+* **Customers List**: Navigating to `/dashboard/customers` displays 10 new clients (Priya Sharma, Anjali Mehta, etc.).
+* **Measurements**: Click on any customer (e.g. Priya Sharma), open the **Measurements** tab, and view detailed "Lehenga Measurements" and "Saree Blouse Measurements" snapshots.
+* **Orders**: Open the **Orders** tab to view 18 bridal saree/lehenga orders, complete with custom items and payment/balance tracking.
+* **Appointments**: Open `/dashboard/appointments` to view 10 bridal fittings and fabric design consultation schedules.
+* **SVG Analytics Chart**: Open `/dashboard/analytics` to view the interactive gross revenue timeline chart bars with dynamic Indian Rupee (`₹`) labels, gridlines, and animated tooltips!
+
