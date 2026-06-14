@@ -36,10 +36,16 @@ export default function OrdersListPage() {
   // Client side fuzzy match filter by order number or customer name/phone
   const filteredOrders = typedOrders.filter(order => {
     const customer = order.customers;
-    const orderNumMatch = order.order_number.toLowerCase().includes(searchQuery.toLowerCase());
-    const nameMatch = customer?.full_name.toLowerCase().includes(searchQuery.toLowerCase()) || false;
-    const phoneMatch = customer?.phone.includes(searchQuery) || false;
-    const descriptionMatch = order.description?.toLowerCase().includes(searchQuery.toLowerCase()) || false;
+    const orderNumMatch = (order.order_number || '').toLowerCase().includes(searchQuery.toLowerCase());
+    const nameMatch = customer && customer.full_name 
+      ? customer.full_name.toLowerCase().includes(searchQuery.toLowerCase()) 
+      : false;
+    const phoneMatch = customer && customer.phone 
+      ? customer.phone.includes(searchQuery) 
+      : false;
+    const descriptionMatch = order.description 
+      ? order.description.toLowerCase().includes(searchQuery.toLowerCase()) 
+      : false;
     
     return orderNumMatch || nameMatch || phoneMatch || descriptionMatch;
   });

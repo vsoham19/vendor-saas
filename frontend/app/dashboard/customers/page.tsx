@@ -65,10 +65,15 @@ function CustomerListContent() {
   });
 
   // Client Side Fuzzy/Exact Match Filter Engine for Name or Phone Lookups
-  const filteredCustomers = customers.filter(customer => 
-    customer.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    customer.phone.includes(searchQuery)
-  );
+  const filteredCustomers = customers.filter(customer => {
+    const nameMatch = customer.full_name 
+      ? customer.full_name.toLowerCase().includes(searchQuery.toLowerCase()) 
+      : false;
+    const phoneMatch = customer.phone 
+      ? customer.phone.includes(searchQuery) 
+      : false;
+    return nameMatch || phoneMatch;
+  });
 
   // Supabase Database Mutation for instant client insertion
   const createCustomerMutation = useMutation({

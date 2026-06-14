@@ -20,13 +20,11 @@ export interface OrderItemInput {
   unit_price: number;
 }
 
-export function useOrders() {
-  const queryClient = useQueryClient();
+export function useListOrders(statusFilter?: string) {
   const { user } = useAuthStore();
   const vendorId = user?.vendorId;
 
-  // 1. List all active studio invoices
-  const useList = (statusFilter?: string) => useQuery({
+  return useQuery({
     queryKey: ['orders', statusFilter, vendorId],
     queryFn: async () => {
       if (!vendorId) return [];
@@ -45,9 +43,13 @@ export function useOrders() {
     },
     enabled: !!vendorId
   });
+}
 
-  // 2. Fetch full consolidated order data details
-  const useDetails = (id: string) => useQuery({
+export function useOrderDetails(id: string) {
+  const { user } = useAuthStore();
+  const vendorId = user?.vendorId;
+
+  return useQuery({
     queryKey: ['order', id, vendorId],
     queryFn: async () => {
       if (!vendorId) throw new Error('Not authenticated');
@@ -67,9 +69,12 @@ export function useOrders() {
     },
     enabled: !!id && !!vendorId
   });
+}
 
-  // 3. Composite mutation to handle multi-row transactional order creations
-  const useCreate = () => useMutation({
+export function useCreateOrder() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
     mutationFn: async (payload: { order: OrderInput; items: OrderItemInput[]; advance?: { amount: number; mode: string; ref: string } | null }) => {
       // Step A: Insert master order base record (Trigger handles ORD- number auto-generation)
       const { data: newOrder, error: orderErr } = await supabase.from('orders').insert([payload.order]).select().single();
@@ -106,9 +111,12 @@ export function useOrders() {
       queryClient.invalidateQueries({ queryKey: ['customer-profile', variables.order.customer_id] });
     }
   });
+}
 
-  // 4. Record new immutable runtime payment entry
-  const useRecordPayment = () => useMutation({
+export function useRecordPayment() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
     mutationFn: async (payload: { order_id: string; customer_id: string; amount: number; payment_mode: string; reference_note: string | null }) => {
       const { data, error } = await supabase.from('payments').insert([payload]).select();
       if (error) throw new Error(error.message);
@@ -121,6 +129,13 @@ export function useOrders() {
       if (custId) queryClient.invalidateQueries({ queryKey: ['customer-profile', custId] });
     }
   });
+}
 
-  return { useList, useDetails, useCreate, useRecordPayment };
+export function useOrders() {
+  return {
+    useList: useListOrders,
+    useDetails: useOrderDetails,
+    useCreate: useCreateOrder,
+    useRecordPayment: useRecordPayment
+  };
 }
