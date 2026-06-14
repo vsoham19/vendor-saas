@@ -28,6 +28,7 @@ export default function AnalyticsDashboardPage() {
   const router = useRouter();
   const { user } = useAuthStore();
   const [period, setPeriod] = useState<PeriodType>('month');
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
   // Hard role guard restriction layer check (Securing client view paths)
   const isOwner = user?.role === 'owner' || true; // Fallback helper during initial hydrate runs
@@ -289,26 +290,173 @@ export default function AnalyticsDashboardPage() {
           <p className="text-xs text-ink-muted">Summation logs of manual payment credits captured across selected timeline ranges.</p>
         </div>
 
-        {/* Responsive Flex Bar Chart Canvas */}
-        <div className="w-full h-48 border-b border-l border-zinc-200/80 flex items-end justify-around pt-6 px-2 sm:px-6 relative bg-background/30">
+        {/* Premium Interactive SVG Revenue Bar Chart */}
+        <div className="w-full bg-surface-container-low/20 border border-outline-variant/60 p-4 rounded-none select-none">
           {chartBars.length === 0 ? (
-            <div className="absolute inset-0 flex items-center justify-center text-xs text-ink-muted">No payments captured for this period</div>
+            <div className="w-full h-52 flex items-center justify-center text-xs font-semibold text-on-surface-variant/75 tracking-wide uppercase">
+              No payment transactions captured in this timeframe
+            </div>
           ) : (
-            chartBars.map((bar, index) => (
-              <div key={index} className="flex flex-col items-center group w-full max-w-[60px] mx-1 relative">
-                {/* Numeric Indicator Tooltip visible dynamically on hover focus */}
-                <div className="absolute -top-6 bg-primary text-white text-[9px] font-mono px-1 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
-                  ₹{bar.amount.toLocaleString('en-IN')}
+            (() => {
+              // Calculate chart dimension metrics
+              const maxVal = Math.max(...chartBars.map(b => b.amount), 0);
+              const roundedMax = maxVal > 0 ? Math.ceil(maxVal / 1000) * 1000 : 1000;
+              
+              // SVG configuration parameters
+              const svgWidth = 600;
+              const svgHeight = 220;
+              const paddingLeft = 65;
+              const paddingRight = 25;
+              const paddingTop = 25;
+              const paddingBottom = 35;
+              
+              const plotWidth = svgWidth - paddingLeft - paddingRight;
+              const plotHeight = svgHeight - paddingTop - paddingBottom;
+              
+              // Gridline Y positions and labels
+              const gridlines = [
+                { y: paddingTop, label: `₹${roundedMax.toLocaleString('en-IN')}` },
+                { y: paddingTop + plotHeight * 0.33, label: `₹${Math.round(roundedMax * 0.67).toLocaleString('en-IN')}` },
+                { y: paddingTop + plotHeight * 0.67, label: `₹${Math.round(roundedMax * 0.33).toLocaleString('en-IN')}` },
+                { y: paddingTop + plotHeight, label: '₹0' }
+              ];
+              
+              const numBars = chartBars.length;
+              const barSpacing = plotWidth / numBars;
+              const barWidth = Math.min(48, barSpacing * 0.45);
+              
+              return (
+                <div className="relative w-full h-[240px] md:h-[280px]">
+                  <svg 
+                    viewBox={`0 0 ${svgWidth} ${svgHeight}`} 
+                    className="w-full h-full font-sans overflow-visible"
+                  >
+                    <defs>
+                      {/* Premium teal gradient fills for bars */}
+                      <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#0d9488" />
+                        <stop offset="100%" stopColor="#115e59" />
+                      </linearGradient>
+                      <linearGradient id="barHoverGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#0f766e" />
+                        <stop offset="100%" stopColor="#134e4a" />
+                      </linearGradient>
+                      {/* Soft shadow for bar elevation */}
+                      <filter id="shadow" x="-8%" y="-8%" width="116%" height="116%">
+                        <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#000" floodOpacity="0.08" />
+                      </filter>
+                    </defs>
+                    
+                    {/* Horizontal gridlines and Y-axis labels */}
+                    {gridlines.map((g, idx) => (
+                      <g key={idx}>
+                        <line 
+                          x1={paddingLeft} 
+                          y1={g.y} 
+                          x2={svgWidth - paddingRight} 
+                          y2={g.y} 
+                          className="stroke-outline-variant/50" 
+                          strokeWidth="1"
+                          strokeDasharray="4 4"
+                        />
+                        <text 
+                          x={paddingLeft - 12} 
+                          y={g.y + 4} 
+                          textAnchor="end" 
+                          className="fill-on-surface-variant text-[9px] font-bold font-mono tracking-tight"
+                        >
+                          {g.label}
+                        </text>
+                      </g>
+                    ))}
+                    
+                    {/* Rendering the data bars */}
+                    {chartBars.map((bar, index) => {
+                      const barHeight = (bar.amount / roundedMax) * plotHeight;
+                      const barX = paddingLeft + index * barSpacing + (barSpacing - barWidth) / 2;
+                      const barY = paddingTop + plotHeight - barHeight;
+                      const isHovered = hoveredIndex === index;
+                      
+                      return (
+                        <g key={index}>
+                          {/* Invisible hover capture block to expand mouse region */}
+                          <rect
+                            x={paddingLeft + index * barSpacing}
+                            y={paddingTop}
+                            width={barSpacing}
+                            height={plotHeight}
+                            className="fill-transparent cursor-pointer"
+                            onMouseEnter={() => setHoveredIndex(index)}
+                            onMouseLeave={() => setHoveredIndex(null)}
+                          />
+                          
+                          {/* The actual visual data bar */}
+                          <rect
+                            x={barX}
+                            y={barY}
+                            width={barWidth}
+                            height={Math.max(2, barHeight)} // min 2px height for visual feedback
+                            rx={4}
+                            fill={isHovered ? 'url(#barHoverGradient)' : 'url(#barGradient)'}
+                            filter="url(#shadow)"
+                            className="transition-all duration-300 pointer-events-none"
+                          />
+                          
+                          {/* X-axis labels centered below each bar */}
+                          <text
+                            x={barX + barWidth / 2}
+                            y={svgHeight - 14}
+                            textAnchor="middle"
+                            className={`text-[10px] font-bold tracking-wide transition-all ${isHovered ? 'fill-primary font-extrabold' : 'fill-on-surface-variant'}`}
+                          >
+                            {bar.label}
+                          </text>
+                          
+                          {/* Custom Interactive Tooltip */}
+                          {isHovered && (
+                            <g className="animate-fadeIn pointer-events-none">
+                              <rect
+                                x={barX + barWidth / 2 - 50}
+                                y={barY - 32}
+                                width={100}
+                                height={24}
+                                fill="#1e293b"
+                                rx={4}
+                                className="shadow-lg"
+                              />
+                              <text
+                                x={barX + barWidth / 2}
+                                y={barY - 16}
+                                textAnchor="middle"
+                                fill="#ffffff"
+                                className="text-[10px] font-bold font-mono"
+                              >
+                                ₹{bar.amount.toLocaleString('en-IN')}
+                              </text>
+                              {/* Drop shadow caret indicator pointer arrow */}
+                              <path
+                                d={`M ${barX + barWidth / 2 - 4} ${barY - 8} L ${barX + barWidth / 2} ${barY - 4} L ${barX + barWidth / 2 + 4} ${barY - 8} Z`}
+                                fill="#1e293b"
+                              />
+                            </g>
+                          )}
+                        </g>
+                      );
+                    })}
+                    
+                    {/* Bottom axis solid boundary line */}
+                    <line 
+                      x1={paddingLeft} 
+                      y1={paddingTop + plotHeight} 
+                      x2={svgWidth - paddingRight} 
+                      y2={paddingTop + plotHeight} 
+                      className="stroke-outline-variant" 
+                      strokeWidth="1.5"
+                    />
+                  </svg>
                 </div>
-                <div 
-                  style={{ height: `${bar.percentageHeight}%` }}
-                  className="w-full bg-primary hover:bg-secondary transition-all rounded-t-xs duration-300"
-                />
-                <span className="text-[10px] font-bold text-on-surface-variant mt-2 tracking-tight max-w-full truncate text-center block absolute -bottom-5">
-                  {bar.label}
-                </span>
-              </div>
-            ))
+              );
+            })()
           )}
         </div>
         <div className="h-4" /> {/* Layout safety separation spacing filler */}

@@ -188,10 +188,7 @@ export default function AtelierStudioSettingsPage() {
         throw new Error('Password must be at least 6 characters.');
       }
 
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') || '';
-      if (!apiUrl) throw new Error('Backend API URL is not configured.');
-
-      const response = await fetch(`${apiUrl}/api/staff/invite`, {
+      const response = await fetch('/api/staff/invite', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -207,7 +204,7 @@ export default function AtelierStudioSettingsPage() {
 
       if (!response.ok) {
         const errBody = await response.json().catch(() => ({}));
-        throw new Error(errBody.message || `Request failed with status ${response.status}`);
+        throw new Error(errBody.message || errBody.error || `Request failed with status ${response.status}`);
       }
 
       return response.json();
