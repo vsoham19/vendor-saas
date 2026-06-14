@@ -34,11 +34,13 @@ export default function AnalyticsDashboardPage() {
 
   // Query 1: Fetch dynamic timeline chart tracking configurations
   const { data: chartBars = [] } = useQuery<RevenueBar[]>({
-    queryKey: ['analytics-revenue-chart', period],
+    queryKey: ['analytics-revenue-chart', period, user?.vendorId],
     queryFn: async () => {
+      if (!user?.vendorId) return [];
       const { data: payments } = await supabase
         .from('payments')
-        .select('amount, created_at');
+        .select('amount, created_at, customers!inner(vendor_id)')
+        .eq('customers.vendor_id', user.vendorId);
 
       const payList = payments || [];
 
@@ -101,19 +103,21 @@ export default function AnalyticsDashboardPage() {
           percentageHeight: Math.round((amount / maxAmt) * 100)
         }));
       }
-    }
+    },
+    enabled: !!user?.vendorId
   });
 
   // Query 2: Fetch detailed business diagnostic summaries
   const { data: matrix = { totalOutstanding: 0, topOutstandingCustomers: [], topCustomersByValue: [], topCustomersByFrequency: [], topItemsRanked: [], appointmentCompletionRate: 0, appointmentNoShowRate: 0 } } = useQuery<AnalyticsData>({
-    queryKey: ['analytics-metrics-summary'],
+    queryKey: ['analytics-metrics-summary', user?.vendorId],
     queryFn: async () => {
+      if (!user?.vendorId) throw new Error('Not authenticated');
       const [ordersRes, paymentsRes, customersRes, appointmentsRes, orderItemsRes] = await Promise.all([
-        supabase.from('orders').select('*'),
-        supabase.from('payments').select('*'),
-        supabase.from('customers').select('*'),
-        supabase.from('appointments').select('*'),
-        supabase.from('order_items').select('*')
+        supabase.from('orders').select('*').eq('vendor_id', user.vendorId),
+        supabase.from('payments').select('*, customers!inner(vendor_id)').eq('customers.vendor_id', user.vendorId),
+        supabase.from('customers').select('*').eq('vendor_id', user.vendorId),
+        supabase.from('appointments').select('*').eq('vendor_id', user.vendorId),
+        supabase.from('order_items').select('*, orders!inner(vendor_id)').eq('orders.vendor_id', user.vendorId)
       ]);
 
       const orders = ordersRes.data || [];
@@ -216,7 +220,8 @@ export default function AnalyticsDashboardPage() {
         appointmentCompletionRate: completionRate,
         appointmentNoShowRate: noShowRate
       };
-    }
+    },
+    enabled: !!user?.vendorId
   });
 
   if (!isOwner) {

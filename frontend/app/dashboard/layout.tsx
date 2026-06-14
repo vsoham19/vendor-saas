@@ -1,9 +1,10 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
+import { supabase } from '@/utils/supabase';
 
 const navigationLinks = [
   { label: 'Dashboard', icon: 'dashboard', href: '/dashboard' },
@@ -17,16 +18,103 @@ const navigationLinks = [
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, clearAuth } = useAuthStore();
+  const { user, isAuthenticated, isLoading, clearAuth, setAuth, setLoading } = useAuthStore();
+  const [studioName, setStudioName] = useState('Loading...');
 
-  const handleSignOut = () => {
+  // Session hydration: on mount, restore session from Supabase if auth store is empty
+  useEffect(() => {
+    const hydrateSession = async () => {
+      if (isAuthenticated && user) {
+        // Already authenticated, just fetch the vendor name
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (!session?.user) {
+          // No session — redirect to login
+          clearAuth();
+          router.push('/');
+          return;
+        }
+
+        // Fetch staff profile
+        const { data: staffData, error: staffError } = await supabase
+          .from('staff')
+          .select('id, vendor_id, full_name, email, role, is_active')
+          .eq('auth_user_id', session.user.id)
+          .single();
+
+        if (staffError || !staffData) {
+          // Authenticated but no store — redirect to onboarding
+          router.push('/onboarding');
+          return;
+        }
+
+        if (!staffData.is_active) {
+          clearAuth();
+          router.push('/');
+          return;
+        }
+
+        // Hydrate auth store
+        setAuth({
+          id: staffData.id,
+          vendorId: staffData.vendor_id,
+          fullName: staffData.full_name,
+          email: staffData.email,
+          role: staffData.role as 'owner' | 'assistant',
+          isActive: staffData.is_active,
+        }, session.access_token);
+      } catch {
+        clearAuth();
+        router.push('/');
+      }
+    };
+
+    hydrateSession();
+  }, [isAuthenticated, user, clearAuth, setAuth, setLoading, router]);
+
+  // Fetch the vendor/studio name dynamically
+  useEffect(() => {
+    const fetchVendorName = async () => {
+      if (!user?.vendorId) return;
+      
+      const { data, error } = await supabase
+        .from('vendors')
+        .select('name, business_name')
+        .eq('id', user.vendorId)
+        .single();
+
+      if (data && !error) {
+        setStudioName(data.business_name || data.name || 'My Studio');
+      } else {
+        setStudioName('My Studio');
+      }
+    };
+
+    fetchVendorName();
+  }, [user?.vendorId]);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
     clearAuth();
     router.push('/');
   };
 
-  // Fallback metadata if store session is hydrating natively
-  const activeUser = user || { fullName: 'Alex Mercer', role: 'owner' };
-  const studioName = 'Stitch & Soul Atelier';
+  // Show loading while checking auth
+  if (!isAuthenticated || !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center space-y-3">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-sm text-on-surface-variant">Loading workspace...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-on-surface">
@@ -34,12 +122,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <aside className="hidden lg:flex h-screen w-64 fixed left-0 top-0 sidebar-border bg-background flex-col py-6 px-4 z-50">
         <div className="mb-8">
           <h1 className="font-serif text-3xl text-primary tracking-tight font-bold mb-1">The Atelier</h1>
-          <p className="text-[12px] font-semibold tracking-wider text-on-surface-variant uppercase font-sans">Master Tailor</p>
+          <p className="text-[12px] font-semibold tracking-wider text-on-surface-variant uppercase font-sans truncate" title={studioName}>{studioName}</p>
         </div>
         
         <nav className="flex-grow space-y-1">
           {navigationLinks.map((link) => {
-            if (link.ownerOnly && activeUser.role !== 'owner') return null;
+            if (link.ownerOnly && user.role !== 'owner') return null;
             const isCurrent = pathname === link.href;
             return (
               <Link
@@ -69,10 +157,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           
           <div className="mt-6 flex items-center gap-3 px-2">
             <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold uppercase shrink-0">
-              {activeUser.fullName.substring(0, 2)}
+              {user.fullName.substring(0, 2)}
             </div>
             <div className="overflow-hidden">
-              <p className="text-xs font-bold text-on-surface truncate">{activeUser.fullName}</p>
+              <p className="text-xs font-bold text-on-surface truncate">{user.fullName}</p>
               <button 
                 onClick={handleSignOut}
                 className="text-[10px] text-on-surface-variant uppercase tracking-widest block hover:text-status-due transition-colors"
@@ -103,7 +191,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <span className="material-symbols-outlined">notifications</span>
             </button>
             <div className="hidden sm:block h-8 w-px bg-outline-variant"></div>
-            <p className="font-serif text-lg lg:text-xl text-primary font-bold whitespace-nowrap">{studioName}</p>
+            <p className="font-serif text-lg lg:text-xl text-primary font-bold whitespace-nowrap truncate max-w-[200px]">{studioName}</p>
           </div>
         </header>
 

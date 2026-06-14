@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase';
+import { useAuthStore } from '@/store/authStore';
 
 // Data models matching backend schema definitions
 interface CustomerProfile {
@@ -58,6 +59,8 @@ export default function CustomerProfilePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const customerId = params.id as string;
+  const { user } = useAuthStore();
+  const vendorId = user?.vendorId;
 
   // Tab State Matrix
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -67,60 +70,136 @@ export default function CustomerProfilePage() {
 
   // Query 1: Fetch core profile metadata
   const { data: profile, isLoading: isProfileLoading } = useQuery<CustomerProfile>({
-    queryKey: ['customer-profile', customerId],
+    queryKey: ['customer-profile', customerId, vendorId],
     queryFn: async () => {
-      // Emulating runtime database trigger evaluations returning calculated total_outstanding
+      if (!vendorId) throw new Error('Not authenticated');
+      const { data, error } = await supabase
+        .from('customers')
+        .select('id, name, full_name, phone, email, address, notes, total_outstanding')
+        .eq('id', customerId)
+        .eq('vendor_id', vendorId)
+        .single();
+
+      if (error) throw error;
+      if (!data) throw new Error('Customer profile not found');
+
       return {
-        id: customerId,
-        full_name: 'Priya Sharma',
-        phone: '9810012345',
-        email: 'priya.sharma@example.com',
-        address: 'H-24, Green Park Extension, New Delhi, 110016',
-        notes: 'Prefers deep neck cuts on blouses. Prefers traditional Banarasi borders.',
-        total_outstanding: 45000.00
+        id: data.id,
+        full_name: data.full_name || data.name,
+        phone: data.phone,
+        email: data.email,
+        address: data.address,
+        notes: data.notes,
+        total_outstanding: Number(data.total_outstanding || 0)
       };
-    }
+    },
+    enabled: !!customerId && !!vendorId
   });
 
   // Query 2: Fetch full running financial payment histories
   const { data: ledger = [] } = useQuery<LedgerItem[]>({
     queryKey: ['customer-ledger', customerId],
     queryFn: async () => {
-      return [
-        { id: 'p1', amount: 25000.00, payment_mode: 'UPI', reference_note: 'Advance via GPay', paid_at: '2026-05-10T11:00:00Z', order_number: 'ORD-202605-0042' },
-        { id: 'p2', amount: 15000.00, payment_mode: 'Cash', reference_note: 'Fitting trial update', paid_at: '2026-06-01T15:30:00Z', order_number: 'ORD-202605-0042' }
-      ];
-    }
+      const { data, error } = await supabase
+        .from('payments')
+        .select(`
+          id,
+          amount,
+          payment_mode,
+          reference_note,
+          paid_at,
+          orders (
+            order_number
+          )
+        `)
+        .eq('customer_id', customerId)
+        .order('paid_at', { ascending: false });
+
+      if (error) throw error;
+
+      return (data || []).map((item: any) => ({
+        id: item.id,
+        amount: Number(item.amount || 0),
+        payment_mode: item.payment_mode,
+        reference_note: item.reference_note,
+        paid_at: item.paid_at,
+        order_number: Array.isArray(item.orders) ? item.orders[0]?.order_number : item.orders?.order_number
+      }));
+    },
+    enabled: !!customerId
   });
 
   // Query 3: Fetch all historical and active orders
   const { data: orders = [] } = useQuery<OrderItemSummary[]>({
-    queryKey: ['customer-orders', customerId],
+    queryKey: ['customer-orders', customerId, vendorId],
     queryFn: async () => {
-      return [
-        { id: 'o1', order_number: 'ORD-202605-0042', description: 'Bridal Banarasi Lehenga with custom embroidery panels', total_amount: 85000.00, amount_outstanding: 45000.00, status: 'in_progress', delivery_date: '2026-11-15' }
-      ];
-    }
+      if (!vendorId) return [];
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id, order_number, description, total_amount, amount_outstanding, status, delivery_date')
+        .eq('customer_id', customerId)
+        .eq('vendor_id', vendorId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      return (data || []).map((ord: any) => ({
+        id: ord.id,
+        order_number: ord.order_number,
+        description: ord.description,
+        total_amount: Number(ord.total_amount || 0),
+        amount_outstanding: Number(ord.amount_outstanding || 0),
+        status: ord.status,
+        delivery_date: ord.delivery_date
+      }));
+    },
+    enabled: !!customerId && !!vendorId
   });
 
   // Query 4: Fetch logged custom measurements session states
   const { data: measurements = [] } = useQuery<MeasurementRecord[]>({
     queryKey: ['customer-measurements', customerId],
     queryFn: async () => {
-      return [
-        { id: 'm1', label: 'Lehenga Consultation - Initial', values: { 'Kamar': '32', 'Seena': '36', 'Gala': '7.5', 'Length': '41' }, notes: 'Measured with standard 3-inch bridal heels on.', recorded_at: '2026-05-10' }
-      ];
-    }
+      const { data, error } = await supabase
+        .from('customer_measurements')
+        .select('id, label, values, notes, recorded_at')
+        .eq('customer_id', customerId)
+        .order('recorded_at', { ascending: false });
+
+      if (error) throw error;
+
+      return (data || []).map((rec: any) => ({
+        id: rec.id,
+        label: rec.label || 'Unnamed Session',
+        values: rec.values || {},
+        notes: rec.notes,
+        recorded_at: rec.recorded_at
+      }));
+    },
+    enabled: !!customerId
   });
 
   // Query 5: Fetch all chronological fitting appointments
   const { data: appointments = [] } = useQuery<AppointmentItem[]>({
     queryKey: ['customer-appointments', customerId],
     queryFn: async () => {
-      return [
-        { id: 'a1', title: 'Lehenga First Fitting Trial', scheduled_date: '2026-06-15', stage: 'trial_1', status: 'scheduled' }
-      ];
-    }
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('id, title, scheduled_date, stage, status')
+        .eq('customer_id', customerId)
+        .order('scheduled_date', { ascending: true });
+
+      if (error) throw error;
+
+      return (data || []).map((appt: any) => ({
+        id: appt.id,
+        title: appt.title,
+        scheduled_date: appt.scheduled_date,
+        stage: appt.stage,
+        status: appt.status
+      }));
+    },
+    enabled: !!customerId
   });
 
   if (isProfileLoading || !profile) {

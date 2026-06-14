@@ -40,11 +40,13 @@ function CustomerListContent() {
 
   // TanStack React Query v5: Fetch Vendor Customers
   const { data: customers = [], isLoading } = useQuery<CustomerListItem[]>({
-    queryKey: ['customers-list'],
+    queryKey: ['customers-list', user?.vendorId],
     queryFn: async () => {
+      if (!user?.vendorId) return [];
       const { data, error } = await supabase
         .from('customers')
         .select('*, orders(id, status)')
+        .eq('vendor_id', user.vendorId)
         .order('full_name', { ascending: true });
         
       if (error) throw new Error(error.message);
@@ -58,7 +60,8 @@ function CustomerListContent() {
           (o: any) => o.status !== 'delivered' && o.status !== 'cancelled'
         ).length
       }));
-    }
+    },
+    enabled: !!user?.vendorId
   });
 
   // Client Side Fuzzy/Exact Match Filter Engine for Name or Phone Lookups
@@ -71,14 +74,18 @@ function CustomerListContent() {
   const createCustomerMutation = useMutation({
     mutationFn: async (payload: { full_name: string; phone: string }) => {
       setFormError(null);
-      // Actual Supabase dynamic execution pipeline matches constraints cleanly
+      
+      if (!user?.vendorId) {
+        throw new Error('No store linked to your account. Please complete onboarding first.');
+      }
+
       const { data, error } = await supabase
         .from('customers')
         .insert([{
           full_name: payload.full_name,
           name: payload.full_name,
           phone: payload.phone,
-          vendor_id: user?.vendorId || 'd290f1ee-6c54-4b01-90e6-d701748f0851'
+          vendor_id: user.vendorId
         }])
         .select();
       

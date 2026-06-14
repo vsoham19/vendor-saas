@@ -77,6 +77,7 @@ router.post('/invite', async (req: Request, res: Response, next: NextFunction) =
       .insert([{
         vendor_id,
         auth_user_id: newAuthUser.user.id,
+        name: name,
         full_name: name,
         email,
         role: 'assistant',

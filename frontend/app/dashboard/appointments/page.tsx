@@ -44,11 +44,13 @@ export default function AppointmentCalendarPage() {
 
   // Fetch Appointments from Supabase
   const { data: appointments = [], isLoading } = useQuery<AppointmentItem[]>({
-    queryKey: ['appointments-master-list'],
+    queryKey: ['appointments-master-list', user?.vendorId],
     queryFn: async () => {
+      if (!user?.vendorId) return [];
       const { data, error } = await supabase
         .from('appointments')
         .select('*, customers(full_name, name, phone), orders(order_number)')
+        .eq('vendor_id', user.vendorId)
         .order('scheduled_date', { ascending: true });
         
       if (error) throw new Error(error.message);
@@ -67,35 +69,42 @@ export default function AppointmentCalendarPage() {
         status: appt.status || 'scheduled',
         notes: appt.notes
       }));
-    }
+    },
+    enabled: !!user?.vendorId
   });
 
   // Fetch Customers for select dropdown
   const { data: customerList = [] } = useQuery({
-    queryKey: ['appointments-customer-select'],
+    queryKey: ['appointments-customer-select', user?.vendorId],
     queryFn: async () => {
+      if (!user?.vendorId) return [];
       const { data, error } = await supabase
         .from('customers')
         .select('id, full_name, name, phone')
+        .eq('vendor_id', user.vendorId)
         .order('full_name', { ascending: true });
         
       if (error) throw error;
       return data || [];
-    }
+    },
+    enabled: !!user?.vendorId
   });
 
   // Fetch Orders for select dropdown
   const { data: orderList = [] } = useQuery({
-    queryKey: ['appointments-order-select'],
+    queryKey: ['appointments-order-select', user?.vendorId],
     queryFn: async () => {
+      if (!user?.vendorId) return [];
       const { data, error } = await supabase
         .from('orders')
         .select('id, order_number, customers(full_name, name)')
+        .eq('vendor_id', user.vendorId)
         .order('created_at', { ascending: false });
         
       if (error) throw error;
       return data || [];
-    }
+    },
+    enabled: !!user?.vendorId
   });
 
   // Client Side Filtering Engine logic pipeline mapping
@@ -108,6 +117,9 @@ export default function AppointmentCalendarPage() {
   const scheduleAppointmentMutation = useMutation({
     mutationFn: async () => {
       setMutationError(null);
+      if (!user?.vendorId) {
+        throw new Error('No vendor store associated with your profile.');
+      }
       if (!selectedCustomerId || !appointmentTitle || !scheduledDate) {
         throw new Error('Customer assignment, title anchors and date fields are mandatory details.');
       }
@@ -123,7 +135,7 @@ export default function AppointmentCalendarPage() {
         time_slot: timeSlotText || null,
         notes: notesText || null,
         status: 'scheduled',
-        vendor_id: user?.vendorId || 'd290f1ee-6c54-4b01-90e6-d701748f0851'
+        vendor_id: user.vendorId
       };
 
       const { data, error } = await supabase.from('appointments').insert([payload]).select();

@@ -2,8 +2,10 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase';
+import { useAuthStore } from '@/store/authStore';
+import { useOrders } from '@/hooks/useOrders';
 
 interface CustomerOption {
   id: string;
@@ -20,6 +22,9 @@ interface LineItemState {
 
 export default function CreateOrderPage() {
   const router = useRouter();
+  const { user } = useAuthStore();
+  const { useCreate } = useOrders();
+  const createMutation = useCreate();
 
   // 1. Form Field States
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
@@ -41,15 +46,23 @@ export default function CreateOrderPage() {
 
   // TanStack Query: Fetch customers for search selection dropdown
   const { data: customers = [] } = useQuery<CustomerOption[]>({
-    queryKey: ['customers-selector-list'],
+    queryKey: ['customers-selector-list', user?.vendorId],
     queryFn: async () => {
-      // Direct pull mimicking multi-tenant scope return
-      return [
-        { id: 'c1', full_name: 'Priya Sharma', phone: '9810012345' },
-        { id: 'c2', full_name: 'Arjun Kapoor', phone: '9871122334' },
-        { id: 'c4', full_name: 'Kabir Singh', phone: '9111223344' }
-      ];
-    }
+      if (!user?.vendorId) return [];
+      const { data, error } = await supabase
+        .from('customers')
+        .select('id, full_name, name, phone')
+        .eq('vendor_id', user.vendorId)
+        .order('full_name', { ascending: true });
+        
+      if (error) throw error;
+      return (data || []).map((c: any) => ({
+        id: c.id,
+        full_name: c.full_name || c.name,
+        phone: c.phone
+      }));
+    },
+    enabled: !!user?.vendorId
   });
 
   // Dynamic Calculation Framework (Calculates live totals on mobile shop floor)
@@ -76,35 +89,56 @@ export default function CreateOrderPage() {
     setLineItems(updated);
   };
 
-  // Order Submission Pipeline
-  const createOrderMutation = useMutation({
-    mutationFn: async () => {
-      setFormError(null);
-      if (!selectedCustomerId) throw new Error('You must assign a customer to initialize this invoice.');
-      if (totalAmount <= 0) throw new Error('Order total must be greater than zero.');
-      if (collectAdvance && advanceAmount > totalAmount) throw new Error('Advance payments cannot exceed gross bill values.');
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
 
-      // Execution Payload structure maps safely directly onto Supabase models
-      const orderPayload = {
+    if (!selectedCustomerId) {
+      setFormError('You must assign a customer to initialize this invoice.');
+      return;
+    }
+    if (totalAmount <= 0) {
+      setFormError('Order total must be greater than zero.');
+      return;
+    }
+    if (collectAdvance && advanceAmount > totalAmount) {
+      setFormError('Advance payments cannot exceed gross bill values.');
+      return;
+    }
+    if (!user?.vendorId) {
+      setFormError('No store vendor account associated with your profile.');
+      return;
+    }
+
+    createMutation.mutate({
+      order: {
         customer_id: selectedCustomerId,
-        description,
+        vendor_id: user.vendorId,
+        description: description || null,
         total_amount: totalAmount,
         delivery_date: deliveryDate || null,
-        notes,
-        status: 'pending'
-      };
-
-      // In production execution block, items array map runs concurrently with payment insert log entry
-      console.log('Sending Master Payload: ', { orderPayload, lineItems, advance: collectAdvance ? { advanceAmount, paymentMode } : null });
-      return { success: true };
-    },
-    onSuccess: () => {
-      router.push('/dashboard/orders');
-    },
-    onError: (err: any) => {
-      setFormError(err.message || 'Failed to initialize order details.');
-    }
-  });
+        notes: notes || null
+      },
+      items: lineItems.map(item => ({
+        item_name: item.item_name,
+        description: item.description || null,
+        quantity: item.quantity,
+        unit_price: item.unit_price
+      })),
+      advance: collectAdvance ? {
+        amount: advanceAmount,
+        mode: paymentMode,
+        ref: referenceNote || ''
+      } : null
+    }, {
+      onSuccess: () => {
+        router.push('/dashboard/orders');
+      },
+      onError: (err: any) => {
+        setFormError(err.message || 'Failed to initialize order details.');
+      }
+    });
+  };
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto">
@@ -128,7 +162,7 @@ export default function CreateOrderPage() {
         </div>
       )}
 
-      <form onSubmit={(e) => { e.preventDefault(); createOrderMutation.mutate(); }} className="space-y-6 text-sm">
+      <form onSubmit={handleFormSubmit} className="space-y-6 text-sm">
         
         {/* BLOCK 1: CUSTOMER METADATA TARGET */}
         <div className="bg-surface-container-lowest p-5 border border-zinc-200 space-y-4">
@@ -334,10 +368,10 @@ export default function CreateOrderPage() {
 
           <button
             type="submit"
-            disabled={createOrderMutation.isPending}
+            disabled={createMutation.isPending}
             className="w-full sm:w-auto min-h-[44px] px-8 py-3 bg-primary text-white text-xs font-bold tracking-wider uppercase hover:bg-opacity-95 disabled:opacity-50 transition-all active:scale-[0.99] self-stretch sm:self-auto flex items-center justify-center"
           >
-            {createOrderMutation.isPending ? 'Processing Dues...' : 'Initialize Live Order'}
+            {createMutation.isPending ? 'Processing Dues...' : 'Initialize Live Order'}
           </button>
         </div>
 

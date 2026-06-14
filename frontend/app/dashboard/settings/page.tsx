@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase';
+import { useAuthStore } from '@/store/authStore';
 
 interface MeasurementTemplateField {
   id: string;
@@ -20,9 +21,18 @@ interface StaffProfileRow {
   is_active: boolean;
 }
 
+interface VendorProfile {
+  id: string;
+  name: string;
+  address: string | null;
+  description: string | null;
+}
+
 export default function AtelierStudioSettingsPage() {
   const queryClient = useQueryClient();
+  const { user, token } = useAuthStore();
   const [sectionError, setSectionError] = useState<string | null>(null);
+  const [sectionSuccess, setSectionSuccess] = useState<string | null>(null);
 
   // Form Field Local Temporary Capture Buffers
   const [newFieldName, setNewFieldName] = useState('');
@@ -31,40 +41,97 @@ export default function AtelierStudioSettingsPage() {
   // Staff Invite Buffer
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
+  const [invitePassword, setInvitePassword] = useState('');
 
-  // Query A: Fetch Custom User-Defined Column Arrays
+  // Business Profile Editable States
+  const [editBusinessName, setEditBusinessName] = useState('');
+  const [editBusinessAddress, setEditBusinessAddress] = useState('');
+  const [editBusinessDescription, setEditBusinessDescription] = useState('');
+  const [isBusinessEditing, setIsBusinessEditing] = useState(false);
+
+  // Query A: Fetch Vendor Profile
+  const { data: vendorProfile } = useQuery<VendorProfile | null>({
+    queryKey: ['vendor-profile', user?.vendorId],
+    queryFn: async () => {
+      if (!user?.vendorId) return null;
+      const { data, error } = await supabase
+        .from('vendors')
+        .select('id, name, business_name, address, description')
+        .eq('id', user.vendorId)
+        .single();
+      if (error) throw error;
+      return data ? { ...data, name: data.business_name || data.name } : null;
+    },
+    enabled: !!user?.vendorId,
+  });
+
+  // Query B: Fetch Measurement Field Templates
   const { data: fields = [] } = useQuery<MeasurementTemplateField[]>({
-    queryKey: ['settings-measurement-fields-list'],
+    queryKey: ['settings-measurement-fields-list', user?.vendorId],
     queryFn: async () => {
-      return [
-        { id: 'f1', field_name: 'Kamar (Waist)', unit: 'inches', display_order: 1, is_active: true },
-        { id: 'f2', field_name: 'Seena (Chest)', unit: 'inches', display_order: 2, is_active: true },
-        { id: 'f3', field_name: 'Gala Front (Neck)', unit: 'inches', display_order: 3, is_active: true },
-        { id: 'f4', field_name: 'Length (Ghara Lower)', unit: 'inches', display_order: 4, is_active: true },
-        { id: 'f5', field_name: 'Mori (Ankle sleeve)', unit: 'cm', display_order: 5, is_active: false }
-      ];
-    }
+      if (!user?.vendorId) return [];
+      const { data, error } = await supabase
+        .from('measurement_field_templates')
+        .select('id, field_name, unit, display_order, is_active')
+        .eq('vendor_id', user.vendorId)
+        .order('display_order', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user?.vendorId,
   });
 
-  // Query B: Fetch Studio Coworkers List
+  // Query C: Fetch Studio Staff List
   const { data: staffList = [] } = useQuery<StaffProfileRow[]>({
-    queryKey: ['settings-staff-list'],
+    queryKey: ['settings-staff-list', user?.vendorId],
     queryFn: async () => {
-      return [
-        { id: 'st1', full_name: 'Alex Mercer', email: 'alex@stitchandsoul.com', role: 'owner', is_active: true },
-        { id: 'st2', full_name: 'Rahul Kumar', email: 'rahul.assistant@gmail.com', role: 'assistant', is_active: true },
-        { id: 'st3', full_name: 'Priya Das', email: 'priya.stitcher@gmail.com', role: 'assistant', is_active: false }
-      ];
-    }
+      if (!user?.vendorId) return [];
+      const { data, error } = await supabase
+        .from('staff')
+        .select('id, full_name, email, role, is_active')
+        .eq('vendor_id', user.vendorId)
+        .order('role', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user?.vendorId,
   });
 
-  // Mutation 1: Write New Field Parameters to Schema Template Configurations
+  // Mutation: Update Business Profile
+  const updateBusinessMutation = useMutation({
+    mutationFn: async () => {
+      setSectionError(null);
+      if (!editBusinessName.trim()) throw new Error('Store name cannot be empty.');
+      
+      const { error } = await supabase
+        .from('vendors')
+        .update({
+          business_name: editBusinessName.trim(),
+          name: editBusinessName.trim(),
+          address: editBusinessAddress.trim() || null,
+          description: editBusinessDescription.trim() || null,
+        })
+        .eq('id', user?.vendorId);
+      
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vendor-profile'] });
+      setIsBusinessEditing(false);
+      setSectionSuccess('Business profile updated successfully.');
+      setTimeout(() => setSectionSuccess(null), 3000);
+    },
+    onError: (err: any) => setSectionError(err.message),
+  });
+
+  // Mutation: Add New Measurement Field
   const addFieldMutation = useMutation({
     mutationFn: async () => {
       setSectionError(null);
-      if (!newFieldName) throw new Error('Field headers cannot be initialized blank.');
+      if (!newFieldName) throw new Error('Field name cannot be empty.');
       
       const payload = {
+        vendor_id: user?.vendorId,
         field_name: newFieldName,
         unit: newFieldUnit || null,
         display_order: fields.length + 1,
@@ -78,34 +145,87 @@ export default function AtelierStudioSettingsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings-measurement-fields-list'] });
       setNewFieldName('');
-    }
+    },
+    onError: (err: any) => setSectionError(err.message),
   });
 
-  // Mutation 2: Toggle Field State or Alter Sequence Index Order Positions
+  // Mutation: Toggle Field State
   const updateFieldMetaMutation = useMutation({
     mutationFn: async ({ fieldId, patches }: { fieldId: string; patches: Partial<MeasurementTemplateField> }) => {
       const { data, error } = await supabase.from('measurement_field_templates').update(patches).eq('id', fieldId).select();
       if (error) throw new Error(error.message);
       return data;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings-measurement-fields-list'] })
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings-measurement-fields-list'] }),
   });
 
-  // Mutation 3: Modify Active Access Parameters for Staff Configurations
+  // Mutation: Toggle Staff Status
   const toggleStaffStatusMutation = useMutation({
     mutationFn: async ({ staffId, nextStatus }: { staffId: string; nextStatus: boolean }) => {
       setSectionError(null);
-      // Hard Boundary Guard Constraint Logic Check matching Critical Rule 8 block conditions
       const subject = staffList.find(s => s.id === staffId);
-      if (subject?.role === 'owner') throw new Error('Administrative owner roots cannot be deactivated or muted.');
+      if (subject?.role === 'owner') throw new Error('Owner accounts cannot be deactivated.');
 
       const { data, error } = await supabase.from('staff').update({ is_active: nextStatus }).eq('id', staffId).select();
       if (error) throw new Error(error.message);
       return data;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings-staff-list'] }),
-    onError: (err: any) => setSectionError(err.message)
+    onError: (err: any) => setSectionError(err.message),
   });
+
+  // Mutation: Invite New Staff (calls backend API)
+  const inviteStaffMutation = useMutation({
+    mutationFn: async () => {
+      setSectionError(null);
+      if (!inviteName.trim() || !inviteEmail.trim() || !invitePassword.trim()) {
+        throw new Error('Name, email, and password are all required.');
+      }
+      if (invitePassword.length < 6) {
+        throw new Error('Password must be at least 6 characters.');
+      }
+
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') || '';
+      if (!apiUrl) throw new Error('Backend API URL is not configured.');
+
+      const response = await fetch(`${apiUrl}/api/staff/invite`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: inviteName.trim(),
+          email: inviteEmail.trim(),
+          password: invitePassword.trim(),
+          vendor_id: user?.vendorId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(errBody.message || `Request failed with status ${response.status}`);
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings-staff-list'] });
+      setInviteName('');
+      setInviteEmail('');
+      setInvitePassword('');
+      setSectionSuccess('Assistant added successfully! They can now sign in.');
+      setTimeout(() => setSectionSuccess(null), 4000);
+    },
+    onError: (err: any) => setSectionError(err.message),
+  });
+
+  const handleStartEditBusiness = () => {
+    setEditBusinessName(vendorProfile?.name || '');
+    setEditBusinessAddress(vendorProfile?.address || '');
+    setEditBusinessDescription(vendorProfile?.description || '');
+    setIsBusinessEditing(true);
+  };
 
   return (
     <div className="space-y-10 max-w-2xl mx-auto pb-12">
@@ -116,39 +236,85 @@ export default function AtelierStudioSettingsPage() {
       </div>
 
       {sectionError && (
-        <div className="p-4 bg-error-container text-on-error-container text-xs font-medium border border-error/20 flex gap-2">
+        <div className="p-4 bg-error-container text-on-error-container text-xs font-medium border border-error/20 flex gap-2 animate-fadeIn">
           <span className="material-symbols-outlined shrink-0 text-base">error</span>
           <p>{sectionError}</p>
         </div>
       )}
 
-      {/* SEGMENT 1: BASE STUDIO BUSINESS PROFILE FORM */}
-      <section className="bg-surface-container-lowest p-5 border border-zinc-200 space-y-4">
-        <h3 className="font-serif text-base font-bold text-primary border-b border-zinc-100 pb-2">Business Profile</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-semibold text-on-surface-variant">
-          <div className="space-y-1">
-            <label className="uppercase">Studio Business Name</label>
-            <input type="text" defaultValue="Stitch & Soul Atelier" className="w-full min-h-[44px] px-3 bg-surface-container-low border border-outline-variant text-sm text-on-surface focus:ring-1 focus:ring-primary" />
-          </div>
-          <div className="space-y-1">
-            <label className="uppercase">Primary GSTIN / Tax Identity (Optional)</label>
-            <input type="text" defaultValue="07AAAAA1111A1Z1" className="w-full min-h-[44px] px-3 bg-surface-container-low border border-outline-variant text-sm text-on-surface focus:ring-1 focus:ring-primary font-mono tracking-wider" />
-          </div>
-          <div className="space-y-1 sm:col-span-2">
-            <label className="uppercase">Physical Atelier Studio Address</label>
-            <input type="text" defaultValue="H-24, Green Park Extension, New Delhi, 110016" className="w-full min-h-[44px] px-3 bg-surface-container-low border border-outline-variant text-sm text-on-surface focus:ring-1 focus:ring-primary" />
-          </div>
+      {sectionSuccess && (
+        <div className="p-4 bg-secondary-container text-on-secondary-container text-xs font-medium border border-secondary/20 flex gap-2 animate-fadeIn">
+          <span className="material-symbols-outlined shrink-0 text-base">check_circle</span>
+          <p>{sectionSuccess}</p>
         </div>
+      )}
+
+      {/* SEGMENT 1: BUSINESS PROFILE */}
+      <section className="bg-surface-container-lowest p-5 border border-zinc-200 space-y-4">
+        <div className="flex justify-between items-center border-b border-zinc-100 pb-2">
+          <h3 className="font-serif text-base font-bold text-primary">Business Profile</h3>
+          {!isBusinessEditing && (
+            <button
+              type="button"
+              onClick={handleStartEditBusiness}
+              className="text-xs font-bold text-secondary uppercase tracking-wider hover:underline"
+            >
+              Edit
+            </button>
+          )}
+        </div>
+
+        {isBusinessEditing ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-semibold text-on-surface-variant">
+              <div className="space-y-1 sm:col-span-2">
+                <label className="uppercase">Studio Business Name *</label>
+                <input type="text" value={editBusinessName} onChange={(e) => setEditBusinessName(e.target.value)} className="w-full min-h-[44px] px-3 bg-surface-container-low border border-outline-variant text-sm text-on-surface focus:ring-1 focus:ring-primary" />
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <label className="uppercase">Physical Address</label>
+                <input type="text" value={editBusinessAddress} onChange={(e) => setEditBusinessAddress(e.target.value)} className="w-full min-h-[44px] px-3 bg-surface-container-low border border-outline-variant text-sm text-on-surface focus:ring-1 focus:ring-primary" />
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <label className="uppercase">About / Description</label>
+                <textarea rows={2} value={editBusinessDescription} onChange={(e) => setEditBusinessDescription(e.target.value)} className="w-full px-3 py-2 bg-surface-container-low border border-outline-variant text-sm text-on-surface focus:ring-1 focus:ring-primary resize-none" />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => updateBusinessMutation.mutate()} disabled={updateBusinessMutation.isPending} className="px-5 min-h-[40px] bg-primary text-white text-xs font-bold tracking-wider uppercase hover:bg-opacity-95 disabled:opacity-50">
+                {updateBusinessMutation.isPending ? 'Saving...' : 'Save Changes'}
+              </button>
+              <button type="button" onClick={() => setIsBusinessEditing(false)} className="px-5 min-h-[40px] border border-outline-variant text-xs font-bold tracking-wider uppercase text-on-surface-variant hover:bg-surface-container-low">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-semibold text-on-surface-variant">
+            <div className="space-y-1 sm:col-span-2">
+              <label className="uppercase text-[10px]">Studio Name</label>
+              <p className="text-sm text-on-surface font-medium">{vendorProfile?.name || '—'}</p>
+            </div>
+            <div className="space-y-1 sm:col-span-2">
+              <label className="uppercase text-[10px]">Address</label>
+              <p className="text-sm text-on-surface font-medium">{vendorProfile?.address || 'Not set'}</p>
+            </div>
+            <div className="space-y-1 sm:col-span-2">
+              <label className="uppercase text-[10px]">Description</label>
+              <p className="text-sm text-on-surface font-medium">{vendorProfile?.description || 'Not set'}</p>
+            </div>
+          </div>
+        )}
       </section>
 
-      {/* SEGMENT 2: THE REGISTER KILLER — DYNAMIC VARIABLE MEASUREMENT FIELDS DEFINITIONS SETUP */}
+      {/* SEGMENT 2: MEASUREMENT FIELDS DEFINITION */}
       <section className="bg-surface-container-lowest p-5 border border-zinc-200 space-y-4">
         <div>
           <h3 className="font-serif text-base font-bold text-primary uppercase tracking-wide">Measurement Column Fields Definition</h3>
-          <p className="text-xs text-ink-muted mt-0.5">Define your custom structural parameters. Changes instantly instantiate fields runtime across data entry sheets.</p>
+          <p className="text-xs text-ink-muted mt-0.5">Define your custom structural parameters. Changes appear instantly across data entry sheets.</p>
         </div>
 
-        {/* Input Block configuration setup anchor */}
+        {/* Input Block */}
         <div className="flex flex-col sm:flex-row gap-2 items-end bg-background p-3 border border-zinc-100">
           <div className="w-full sm:flex-grow space-y-1 text-xs font-bold text-on-surface-variant">
             <label className="uppercase">Field Header Label</label>
@@ -182,108 +348,124 @@ export default function AtelierStudioSettingsPage() {
           </button>
         </div>
 
-        {/* Active configurations dynamic tracking grid lists */}
+        {/* Active fields list */}
         <div className="border border-zinc-200 divide-y divide-zinc-100 max-h-[350px] overflow-y-auto">
-          {fields.map((f, index) => (
-            <div key={f.id} className={`p-3 flex items-center justify-between gap-4 text-xs ${f.is_active ? 'bg-white' : 'bg-zinc-50 opacity-60'}`}>
-              <div className="space-y-0.5">
-                <p className="font-bold text-primary text-sm">{f.field_name}</p>
-                <p className="text-[10px] text-ink-muted uppercase tracking-wider font-semibold">Unit Type: {f.unit || 'Standard Float'} | Order Matrix Index: {f.display_order}</p>
-              </div>
+          {fields.length === 0 ? (
+            <div className="p-6 text-center text-xs text-ink-muted">No measurement fields configured yet. Add one above.</div>
+          ) : (
+            fields.map((f, index) => (
+              <div key={f.id} className={`p-3 flex items-center justify-between gap-4 text-xs ${f.is_active ? 'bg-white' : 'bg-zinc-50 opacity-60'}`}>
+                <div className="space-y-0.5">
+                  <p className="font-bold text-primary text-sm">{f.field_name}</p>
+                  <p className="text-[10px] text-ink-muted uppercase tracking-wider font-semibold">Unit Type: {f.unit || 'Standard Float'} | Order: {f.display_order}</p>
+                </div>
 
-              <div className="flex items-center gap-2 shrink-0">
-                {/* Positional Sequence Modifiers matching Drag specifications using tap triggers */}
-                <button 
-                  type="button" 
-                  disabled={index === 0}
-                  onClick={() => updateFieldMetaMutation.mutate({ fieldId: f.id, patches: { display_order: f.display_order - 1 } })}
-                  className="material-symbols-outlined text-sm p-1 border border-zinc-200 text-on-surface-variant hover:text-primary disabled:opacity-30"
-                >
-                  arrow_upward
-                </button>
-                <button 
-                  type="button" 
-                  disabled={index === fields.length - 1}
-                  onClick={() => updateFieldMetaMutation.mutate({ fieldId: f.id, patches: { display_order: f.display_order + 1 } })}
-                  className="material-symbols-outlined text-sm p-1 border border-zinc-200 text-on-surface-variant hover:text-primary disabled:opacity-30"
-                >
-                  arrow_downward
-                </button>
-                
-                {/* Visibility Deactivation Toggle switch segment */}
-                <button
-                  type="button"
-                  onClick={() => updateFieldMetaMutation.mutate({ fieldId: f.id, patches: { is_active: !f.is_active } })}
-                  className={`px-2.5 py-1 text-[10px] font-bold tracking-widest uppercase border ${f.is_active ? 'border-status-paid text-status-paid bg-emerald-50/20' : 'border-outline text-ink-muted bg-zinc-100'}`}
-                >
-                  {f.is_active ? 'Active' : 'Muted'}
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button 
+                    type="button" 
+                    disabled={index === 0}
+                    onClick={() => updateFieldMetaMutation.mutate({ fieldId: f.id, patches: { display_order: f.display_order - 1 } })}
+                    className="material-symbols-outlined text-sm p-1 border border-zinc-200 text-on-surface-variant hover:text-primary disabled:opacity-30"
+                  >
+                    arrow_upward
+                  </button>
+                  <button 
+                    type="button" 
+                    disabled={index === fields.length - 1}
+                    onClick={() => updateFieldMetaMutation.mutate({ fieldId: f.id, patches: { display_order: f.display_order + 1 } })}
+                    className="material-symbols-outlined text-sm p-1 border border-zinc-200 text-on-surface-variant hover:text-primary disabled:opacity-30"
+                  >
+                    arrow_downward
+                  </button>
+                  
+                  <button
+                    type="button"
+                    onClick={() => updateFieldMetaMutation.mutate({ fieldId: f.id, patches: { is_active: !f.is_active } })}
+                    className={`px-2.5 py-1 text-[10px] font-bold tracking-widest uppercase border ${f.is_active ? 'border-status-paid text-status-paid bg-emerald-50/20' : 'border-outline text-ink-muted bg-zinc-100'}`}
+                  >
+                    {f.is_active ? 'Active' : 'Muted'}
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </section>
 
-      {/* SEGMENT 3: STAFF MANAGEMENT ACCESS LEVEL SECURITY CONTROLS */}
+      {/* SEGMENT 3: STAFF MANAGEMENT */}
       <section className="bg-surface-container-lowest p-5 border border-zinc-200 space-y-4">
         <div>
           <h3 className="font-serif text-base font-bold text-primary uppercase tracking-wide">Studio Coworkers & Staff Clearance</h3>
-          <p className="text-xs text-ink-muted mt-0.5">Authorize assistants. Assistants handle store flow checks but have locked access paths targeting settings/deletes/analytics rulesets.</p>
+          <p className="text-xs text-ink-muted mt-0.5">Authorize assistants. Assistants handle store flow checks but have locked access to settings and analytics.</p>
         </div>
 
-        {/* Core Coworkers List Ledger Data Elements Trace */}
+        {/* Staff List */}
         <div className="border border-zinc-100 divide-y divide-zinc-100 text-xs font-medium">
-          {staffList.map((st) => (
-            <div key={st.id} className="p-3 flex items-center justify-between gap-4 zebra-row">
-              <div>
-                <div className="flex items-center gap-2">
-                  <p className="font-bold text-primary text-sm">{st.full_name}</p>
-                  <span className={`px-2 py-0.5 rounded-none text-[8px] font-bold uppercase tracking-wider ${st.role === 'owner' ? 'bg-primary text-white' : 'bg-surface-container text-on-surface-variant'}`}>
-                    {st.role}
-                  </span>
+          {staffList.length === 0 ? (
+            <div className="p-6 text-center text-ink-muted">No staff members found.</div>
+          ) : (
+            staffList.map((st) => (
+              <div key={st.id} className="p-3 flex items-center justify-between gap-4 zebra-row">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-primary text-sm">{st.full_name}</p>
+                    <span className={`px-2 py-0.5 rounded-none text-[8px] font-bold uppercase tracking-wider ${st.role === 'owner' ? 'bg-primary text-white' : 'bg-surface-container text-on-surface-variant'}`}>
+                      {st.role}
+                    </span>
+                    {!st.is_active && (
+                      <span className="px-2 py-0.5 rounded-none text-[8px] font-bold uppercase tracking-wider bg-error-container text-on-error-container">
+                        Inactive
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-on-surface-variant font-mono">{st.email}</p>
                 </div>
-                <p className="text-[11px] text-on-surface-variant font-mono">{st.email}</p>
-              </div>
 
-              {/* Exclusion guard verification logic trace checks */}
-              {st.role !== 'owner' ? (
-                <button
-                  type="button"
-                  onClick={() => toggleStaffStatusMutation.mutate({ staffId: st.id, nextStatus: !st.is_active })}
-                  disabled={toggleStaffStatusMutation.isPending}
-                  className={`min-h-[36px] px-3 font-bold uppercase tracking-wider text-[10px] transition-all border ${
-                    st.is_active ? 'border-status-due text-status-due hover:bg-red-50/40' : 'border-status-paid text-status-paid hover:bg-emerald-50/40'
-                  }`}
-                >
-                  {st.is_active ? 'Deactivate Access' : 'Reactivate Key'}
-                </button>
-              ) : (
-                <span className="text-[10px] uppercase text-ink-muted font-bold tracking-widest p-1 select-none">Root Account</span>
-              )}
-            </div>
-          ))}
+                {st.role !== 'owner' ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleStaffStatusMutation.mutate({ staffId: st.id, nextStatus: !st.is_active })}
+                    disabled={toggleStaffStatusMutation.isPending}
+                    className={`min-h-[36px] px-3 font-bold uppercase tracking-wider text-[10px] transition-all border ${
+                      st.is_active ? 'border-status-due text-status-due hover:bg-red-50/40' : 'border-status-paid text-status-paid hover:bg-emerald-50/40'
+                    }`}
+                  >
+                    {st.is_active ? 'Deactivate' : 'Reactivate'}
+                  </button>
+                ) : (
+                  <span className="text-[10px] uppercase text-ink-muted font-bold tracking-widest p-1 select-none">Root Account</span>
+                )}
+              </div>
+            ))
+          )}
         </div>
 
         <hr className="border-zinc-100" />
 
-        {/* Quick invite inline trigger box entry form element */}
+        {/* Add New Assistant Form */}
         <div className="space-y-3 pt-2">
-          <p className="text-xs font-bold text-primary uppercase tracking-wide">Invite New Assistant Token</p>
+          <p className="text-xs font-bold text-primary uppercase tracking-wide">Add New Assistant</p>
+          <p className="text-[11px] text-on-surface-variant">Create a new staff account. The assistant can immediately sign in with these credentials.</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-bold text-on-surface-variant">
             <div className="space-y-1">
-              <label>Full Name</label>
+              <label>Full Name *</label>
               <input type="text" placeholder="e.g., Rahul Kumar" value={inviteName} onChange={(e) => setInviteName(e.target.value)} className="w-full min-h-[44px] px-3 bg-surface-container-low border border-outline-variant font-medium text-sm text-on-surface focus:ring-1 focus:ring-primary" />
             </div>
             <div className="space-y-1">
-              <label>Authorization Invite Email Address</label>
+              <label>Email Address *</label>
+              <input type="email" placeholder="assistant@gmail.com" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} className="w-full min-h-[44px] px-3 bg-surface-container-low border border-outline-variant font-medium text-sm text-on-surface focus:ring-1 focus:ring-primary" />
+            </div>
+            <div className="space-y-1 sm:col-span-2">
+              <label>Password * <span className="font-normal text-ink-muted">(Min. 6 characters)</span></label>
               <div className="flex gap-2">
-                <input type="email" placeholder="assistant@gmail.com" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} className="w-full flex-grow min-h-[44px] px-3 bg-surface-container-low border border-outline-variant font-medium text-sm text-on-surface focus:ring-1 focus:ring-primary" />
+                <input type="password" placeholder="Create a password for the assistant" value={invitePassword} onChange={(e) => setInvitePassword(e.target.value)} className="w-full flex-grow min-h-[44px] px-3 bg-surface-container-low border border-outline-variant font-medium text-sm text-on-surface focus:ring-1 focus:ring-primary" />
                 <button
                   type="button"
-                  onClick={() => { setSectionError('Supabase Invitation transmission framework requires verification key activation.'); }}
-                  className="bg-primary text-white text-xs font-bold uppercase tracking-wider px-4 shrink-0 hover:bg-opacity-95"
+                  onClick={() => inviteStaffMutation.mutate()}
+                  disabled={inviteStaffMutation.isPending}
+                  className="bg-primary text-white text-xs font-bold uppercase tracking-wider px-5 shrink-0 hover:bg-opacity-95 disabled:opacity-50 min-h-[44px]"
                 >
-                  Invite
+                  {inviteStaffMutation.isPending ? 'Adding...' : 'Add Assistant'}
                 </button>
               </div>
             </div>

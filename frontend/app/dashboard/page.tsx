@@ -46,8 +46,10 @@ export default function DashboardPage() {
 
   // Query 1: Fetch 4-Point Bento Metric Metrics Row Summary
   const { data: stats = { todayAppointmentsCount: 0, nextAppointmentTime: null, thisMonthRevenue: 0, totalOutstandingDues: 0, ordersInProgressCount: 0 } } = useQuery<DashboardStats>({
-    queryKey: ['dashboard-metrics'],
+    queryKey: ['dashboard-metrics', user?.vendorId],
     queryFn: async () => {
+      if (!user?.vendorId) return { todayAppointmentsCount: 0, nextAppointmentTime: null, thisMonthRevenue: 0, totalOutstandingDues: 0, ordersInProgressCount: 0 };
+      
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
       const endOfToday = new Date();
@@ -61,6 +63,7 @@ export default function DashboardPage() {
       const { data: apptsToday } = await supabase
         .from('appointments')
         .select('id, scheduled_date, time_slot')
+        .eq('vendor_id', user.vendorId)
         .gte('scheduled_date', startOfToday.toISOString())
         .lte('scheduled_date', endOfToday.toISOString())
         .order('scheduled_date', { ascending: true });
@@ -71,7 +74,8 @@ export default function DashboardPage() {
       // B. Sum of this month's revenue (from payments table)
       const { data: paymentsThisMonth } = await supabase
         .from('payments')
-        .select('amount')
+        .select('amount, customers!inner(vendor_id)')
+        .eq('customers.vendor_id', user.vendorId)
         .gte('created_at', startOfMonth.toISOString());
 
       const monthlyRev = (paymentsThisMonth || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
@@ -79,7 +83,8 @@ export default function DashboardPage() {
       // C. Sum of all outstanding dues on orders
       const { data: outstandingOrders } = await supabase
         .from('orders')
-        .select('amount_outstanding');
+        .select('amount_outstanding')
+        .eq('vendor_id', user.vendorId);
 
       const outstanding = (outstandingOrders || []).reduce((sum, o) => sum + Number(o.amount_outstanding || 0), 0);
 
@@ -87,6 +92,7 @@ export default function DashboardPage() {
       const { data: progressOrders } = await supabase
         .from('orders')
         .select('id')
+        .eq('vendor_id', user.vendorId)
         .eq('status', 'in_progress');
 
       return {
@@ -96,13 +102,15 @@ export default function DashboardPage() {
         totalOutstandingDues: outstanding,
         ordersInProgressCount: progressOrders?.length || 0
       };
-    }
+    },
+    enabled: !!user?.vendorId
   });
 
   // Query 2: Fetch Today's Timeline Calendars List
   const { data: appointments = [] } = useQuery<AppointmentItemFeed[]>({
-    queryKey: ['dashboard-appointments-today'],
+    queryKey: ['dashboard-appointments-today', user?.vendorId],
     queryFn: async () => {
+      if (!user?.vendorId) return [];
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
       const endOfToday = new Date();
@@ -111,6 +119,7 @@ export default function DashboardPage() {
       const { data, error } = await supabase
         .from('appointments')
         .select('*, customers(full_name, name), orders(order_number)')
+        .eq('vendor_id', user.vendorId)
         .gte('scheduled_date', startOfToday.toISOString())
         .lte('scheduled_date', endOfToday.toISOString())
         .order('scheduled_date', { ascending: true });
@@ -124,16 +133,19 @@ export default function DashboardPage() {
         stage: a.stage ? a.stage.replace('_', ' ') : 'Intake Consultation',
         orderNumber: a.orders?.order_number || undefined
       }));
-    }
+    },
+    enabled: !!user?.vendorId
   });
 
   // Query 3: Fetch Last 5 Created Orders Overview
   const { data: recentOrders = [] } = useQuery<OrderItemFeed[]>({
-    queryKey: ['dashboard-orders-recent'],
+    queryKey: ['dashboard-orders-recent', user?.vendorId],
     queryFn: async () => {
+      if (!user?.vendorId) return [];
       const { data, error } = await supabase
         .from('orders')
         .select('*, customers(full_name, name)')
+        .eq('vendor_id', user.vendorId)
         .order('created_at', { ascending: false })
         .limit(5);
 
@@ -150,7 +162,8 @@ export default function DashboardPage() {
           ? new Date(o.delivery_date).toLocaleDateString('en-IN', {day: 'numeric', month: 'short'}) 
           : 'Continuous'
       }));
-    }
+    },
+    enabled: !!user?.vendorId
   });
 
   return (

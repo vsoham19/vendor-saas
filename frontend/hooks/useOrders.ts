@@ -2,9 +2,11 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase';
+import { useAuthStore } from '@/store/authStore';
 
 export interface OrderInput {
   customer_id: string;
+  vendor_id?: string;
   description: string | null;
   total_amount: number;
   delivery_date: string | null;
@@ -20,26 +22,42 @@ export interface OrderItemInput {
 
 export function useOrders() {
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
+  const vendorId = user?.vendorId;
 
   // 1. List all active studio invoices
   const useList = (statusFilter?: string) => useQuery({
-    queryKey: ['orders', statusFilter],
+    queryKey: ['orders', statusFilter, vendorId],
     queryFn: async () => {
-      let query = supabase.from('orders').select('*, customers(full_name, phone)').order('created_at', { ascending: false });
+      if (!vendorId) return [];
+      let query = supabase
+        .from('orders')
+        .select('*, customers(full_name, phone)')
+        .eq('vendor_id', vendorId)
+        .order('created_at', { ascending: false });
+        
       if (statusFilter && statusFilter !== 'all') {
         query = query.eq('status', statusFilter);
       }
       const { data, error } = await query;
       if (error) throw new Error(error.message);
       return data || [];
-    }
+    },
+    enabled: !!vendorId
   });
 
   // 2. Fetch full consolidated order data details
   const useDetails = (id: string) => useQuery({
-    queryKey: ['order', id],
+    queryKey: ['order', id, vendorId],
     queryFn: async () => {
-      const { data: order, error: orderErr } = await supabase.from('orders').select('*, customers(*)').eq('id', id).single();
+      if (!vendorId) throw new Error('Not authenticated');
+      const { data: order, error: orderErr } = await supabase
+        .from('orders')
+        .select('*, customers(*)')
+        .eq('id', id)
+        .eq('vendor_id', vendorId)
+        .single();
+        
       if (orderErr) throw new Error(orderErr.message);
 
       const { data: items } = await supabase.from('order_items').select('*').eq('order_id', id);
@@ -47,7 +65,7 @@ export function useOrders() {
 
       return { ...order, items: items || [], payments: payments || [] };
     },
-    enabled: !!id
+    enabled: !!id && !!vendorId
   });
 
   // 3. Composite mutation to handle multi-row transactional order creations
