@@ -22,6 +22,8 @@ interface AnalyticsData {
   topItemsRanked: Array<{ name: string; totalCount: number; segment: string }>;
   appointmentCompletionRate: number;
   appointmentNoShowRate: number;
+  segmentSales: Array<{ label: string; amount: number; percentage: number }>;
+  pipelineRings: Array<{ status: string; label: string; count: number; percentage: number }>;
 }
 
 export default function AnalyticsDashboardPage() {
@@ -29,6 +31,12 @@ export default function AnalyticsDashboardPage() {
   const { user } = useAuthStore();
   const [period, setPeriod] = useState<PeriodType>('month');
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  
+  type ChartTabType = 'trends' | 'breakdown' | 'pipeline';
+  const [chartTab, setChartTab] = useState<ChartTabType>('trends');
+  const [hoveredSegment, setHoveredSegment] = useState<number | null>(null);
+  const [hoveredRing, setHoveredRing] = useState<number | null>(null);
+  const [activePointIdx, setActivePointIdx] = useState<number | null>(null);
 
   // Hard role guard restriction layer check (Securing client view paths)
   const isOwner = user?.role === 'owner' || true; // Fallback helper during initial hydrate runs
@@ -114,7 +122,7 @@ export default function AnalyticsDashboardPage() {
   });
 
   // Query 2: Fetch detailed business diagnostic summaries
-  const { data: matrix = { totalOutstanding: 0, topOutstandingCustomers: [], topCustomersByValue: [], topCustomersByFrequency: [], topItemsRanked: [], appointmentCompletionRate: 0, appointmentNoShowRate: 0 }, error: matrixError } = useQuery<AnalyticsData>({
+  const { data: matrix = { totalOutstanding: 0, topOutstandingCustomers: [], topCustomersByValue: [], topCustomersByFrequency: [], topItemsRanked: [], appointmentCompletionRate: 0, appointmentNoShowRate: 0, segmentSales: [], pipelineRings: [] }, error: matrixError } = useQuery<AnalyticsData>({
     queryKey: ['analytics-metrics-summary', user?.vendorId],
     queryFn: async () => {
       if (!user?.vendorId) throw new Error('Not authenticated');
@@ -223,6 +231,48 @@ export default function AnalyticsDashboardPage() {
       const completionRate = totalAppts > 0 ? Math.round((completedAppts / totalAppts) * 100) : 85;
       const noShowRate = totalAppts > 0 ? Math.round((noShowAppts / totalAppts) * 100) : 5;
 
+      // 7. Garment Segment Sales (Lehenga, Saree, Blouse, Other Custom Pieces)
+      let lehengaSales = 0;
+      let sareeSales = 0;
+      let blouseSales = 0;
+      let otherSales = 0;
+
+      orderItems.forEach(item => {
+        const name = (item.item_name || '').toLowerCase();
+        const price = Number(item.total_price || 0);
+        if (name.includes('lehenga')) {
+          lehengaSales += price;
+        } else if (name.includes('saree')) {
+          sareeSales += price;
+        } else if (name.includes('blouse')) {
+          blouseSales += price;
+        } else {
+          otherSales += price;
+        }
+      });
+
+      const totalSales = lehengaSales + sareeSales + blouseSales + otherSales;
+      const segmentSales = [
+        { label: 'Lehenga', amount: lehengaSales, percentage: totalSales > 0 ? Math.round((lehengaSales / totalSales) * 100) : 0 },
+        { label: 'Saree', amount: sareeSales, percentage: totalSales > 0 ? Math.round((sareeSales / totalSales) * 100) : 0 },
+        { label: 'Blouse', amount: blouseSales, percentage: totalSales > 0 ? Math.round((blouseSales / totalSales) * 100) : 0 },
+        { label: 'Other Blouses/Accessories', amount: otherSales, percentage: totalSales > 0 ? Math.round((otherSales / totalSales) * 100) : 0 }
+      ];
+
+      // 8. Production Pipeline Status distribution
+      const totalOrdersCount = orders.length;
+      const pendingCount = orders.filter(o => o.status === 'pending').length;
+      const inProgressCount = orders.filter(o => o.status === 'in_progress').length;
+      const readyCount = orders.filter(o => o.status === 'ready').length;
+      const deliveredCount = orders.filter(o => o.status === 'delivered').length;
+
+      const pipelineRings = [
+        { status: 'pending', label: 'Pending Receipt', count: pendingCount, percentage: totalOrdersCount > 0 ? Math.round((pendingCount / totalOrdersCount) * 100) : 0 },
+        { status: 'in_progress', label: 'In Production', count: inProgressCount, percentage: totalOrdersCount > 0 ? Math.round((inProgressCount / totalOrdersCount) * 100) : 0 },
+        { status: 'ready', label: 'Ready for Trial', count: readyCount, percentage: totalOrdersCount > 0 ? Math.round((readyCount / totalOrdersCount) * 100) : 0 },
+        { status: 'delivered', label: 'Delivered & Closed', count: deliveredCount, percentage: totalOrdersCount > 0 ? Math.round((deliveredCount / totalOrdersCount) * 100) : 0 }
+      ];
+
       return {
         totalOutstanding,
         topOutstandingCustomers,
@@ -230,7 +280,9 @@ export default function AnalyticsDashboardPage() {
         topCustomersByFrequency,
         topItemsRanked,
         appointmentCompletionRate: completionRate,
-        appointmentNoShowRate: noShowRate
+        appointmentNoShowRate: noShowRate,
+        segmentSales,
+        pipelineRings
       };
     },
     enabled: !!user?.vendorId
@@ -283,182 +335,450 @@ export default function AnalyticsDashboardPage() {
         </div>
       </section>
 
+      {/* Visual Chart Tabs bar */}
+      <div className="flex border-b border-outline-variant/60 gap-6 text-xs font-bold text-on-surface-variant uppercase tracking-wider select-none">
+        <button
+          onClick={() => setChartTab('trends')}
+          className={`pb-3.5 px-1 transition-all border-b-2 ${chartTab === 'trends' ? 'border-primary text-primary font-extrabold' : 'border-transparent hover:text-primary'}`}
+        >
+          Revenue Trends
+        </button>
+        <button
+          onClick={() => setChartTab('breakdown')}
+          className={`pb-3.5 px-1 transition-all border-b-2 ${chartTab === 'breakdown' ? 'border-primary text-primary font-extrabold' : 'border-transparent hover:text-primary'}`}
+        >
+          Garment Segment Sales
+        </button>
+        <button
+          onClick={() => setChartTab('pipeline')}
+          className={`pb-3.5 px-1 transition-all border-b-2 ${chartTab === 'pipeline' ? 'border-primary text-primary font-extrabold' : 'border-transparent hover:text-primary'}`}
+        >
+          Production Pipeline
+        </button>
+      </div>
+
       {/* SECTION 1: VISUAL REVENUE BAR CHART BAR CHART TRACK */}
       <section className="bg-surface-container-lowest border border-zinc-200 p-6 space-y-4 shadow-xs">
         <div>
-          <h3 className="font-serif text-base font-bold text-primary uppercase tracking-wide">Gross Revenue Traces</h3>
-          <p className="text-xs text-ink-muted">Summation logs of manual payment credits captured across selected timeline ranges.</p>
+          <h3 className="font-serif text-base font-bold text-primary uppercase tracking-wide">
+            {chartTab === 'trends' ? 'Gross Revenue Trends' : chartTab === 'breakdown' ? 'Garment Sales Breakdown' : 'Production Pipeline Flow'}
+          </h3>
+          <p className="text-xs text-ink-muted">
+            {chartTab === 'trends' 
+              ? 'Progressive area-trend traces of manual payment credits captured across selected timeline ranges.' 
+              : chartTab === 'breakdown' 
+              ? 'Segmented revenue distribution mapping sales of Lehengas, Sarees, and Blouses.' 
+              : 'Concentric ring logs tracking order metrics currently running in active boutique status stages.'}
+          </p>
         </div>
 
-        {/* Premium Interactive SVG Revenue Bar Chart */}
-        <div className="w-full bg-surface-container-low/20 border border-outline-variant/60 p-4 rounded-none select-none">
-          {chartBars.length === 0 ? (
-            <div className="w-full h-52 flex items-center justify-center text-xs font-semibold text-on-surface-variant/75 tracking-wide uppercase">
-              No payment transactions captured in this timeframe
-            </div>
-          ) : (
-            (() => {
-              // Calculate chart dimension metrics
-              const maxVal = Math.max(...chartBars.map(b => b.amount), 0);
-              const roundedMax = maxVal > 0 ? Math.ceil(maxVal / 1000) * 1000 : 1000;
-              
-              // SVG configuration parameters
-              const svgWidth = 600;
-              const svgHeight = 220;
-              const paddingLeft = 65;
-              const paddingRight = 25;
-              const paddingTop = 25;
-              const paddingBottom = 35;
-              
-              const plotWidth = svgWidth - paddingLeft - paddingRight;
-              const plotHeight = svgHeight - paddingTop - paddingBottom;
-              
-              // Gridline Y positions and labels
-              const gridlines = [
-                { y: paddingTop, label: `₹${roundedMax.toLocaleString('en-IN')}` },
-                { y: paddingTop + plotHeight * 0.33, label: `₹${Math.round(roundedMax * 0.67).toLocaleString('en-IN')}` },
-                { y: paddingTop + plotHeight * 0.67, label: `₹${Math.round(roundedMax * 0.33).toLocaleString('en-IN')}` },
-                { y: paddingTop + plotHeight, label: '₹0' }
-              ];
-              
-              const numBars = chartBars.length;
-              const barSpacing = plotWidth / numBars;
-              const barWidth = Math.min(48, barSpacing * 0.45);
-              
-              return (
-                <div className="relative w-full h-[240px] md:h-[280px]">
-                  <svg 
-                    viewBox={`0 0 ${svgWidth} ${svgHeight}`} 
-                    className="w-full h-full font-sans overflow-visible"
-                  >
-                    <defs>
-                      {/* Premium teal gradient fills for bars */}
-                      <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#0d9488" />
-                        <stop offset="100%" stopColor="#115e59" />
-                      </linearGradient>
-                      <linearGradient id="barHoverGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#0f766e" />
-                        <stop offset="100%" stopColor="#134e4a" />
-                      </linearGradient>
-                      {/* Soft shadow for bar elevation */}
-                      <filter id="shadow" x="-8%" y="-8%" width="116%" height="116%">
-                        <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#000" floodOpacity="0.08" />
-                      </filter>
-                    </defs>
-                    
-                    {/* Horizontal gridlines and Y-axis labels */}
-                    {gridlines.map((g, idx) => (
-                      <g key={idx}>
-                        <line 
-                          x1={paddingLeft} 
-                          y1={g.y} 
-                          x2={svgWidth - paddingRight} 
-                          y2={g.y} 
-                          className="stroke-outline-variant/50" 
-                          strokeWidth="1"
-                          strokeDasharray="4 4"
+        {chartTab === 'trends' && (
+          <div className="w-full bg-surface-container-low/20 border border-outline-variant/60 p-4 rounded-none select-none">
+            {chartBars.length === 0 ? (
+              <div className="w-full h-52 flex items-center justify-center text-xs font-semibold text-on-surface-variant/75 tracking-wide uppercase">
+                No payment transactions captured in this timeframe
+              </div>
+            ) : (
+              (() => {
+                const maxVal = Math.max(...chartBars.map(b => b.amount), 0);
+                const roundedMax = maxVal > 0 ? Math.ceil(maxVal / 1000) * 1000 : 1000;
+                
+                const svgWidth = 600;
+                const svgHeight = 220;
+                const paddingLeft = 65;
+                const paddingRight = 25;
+                const paddingTop = 25;
+                const paddingBottom = 35;
+                
+                const plotWidth = svgWidth - paddingLeft - paddingRight;
+                const plotHeight = svgHeight - paddingTop - paddingBottom;
+                
+                const gridlines = [
+                  { y: paddingTop, label: `₹${roundedMax.toLocaleString('en-IN')}` },
+                  { y: paddingTop + plotHeight * 0.33, label: `₹${Math.round(roundedMax * 0.67).toLocaleString('en-IN')}` },
+                  { y: paddingTop + plotHeight * 0.67, label: `₹${Math.round(roundedMax * 0.33).toLocaleString('en-IN')}` },
+                  { y: paddingTop + plotHeight, label: '₹0' }
+                ];
+                
+                const points = chartBars.map((bar, i) => {
+                  const x = paddingLeft + i * (plotWidth / (chartBars.length - 1 || 1));
+                  const barHeight = (bar.amount / roundedMax) * plotHeight;
+                  const y = paddingTop + plotHeight - barHeight;
+                  return { x, y, label: bar.label, amount: bar.amount };
+                });
+                
+                const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+                const areaPath = points.length > 0 
+                  ? `${linePath} L ${points[points.length - 1].x} ${paddingTop + plotHeight} L ${points[0].x} ${paddingTop + plotHeight} Z`
+                  : '';
+                
+                const activePoint = activePointIdx !== null ? points[activePointIdx] : null;
+
+                return (
+                  <div className="relative w-full h-[240px] md:h-[280px]">
+                    <svg 
+                      viewBox={`0 0 ${svgWidth} ${svgHeight}`} 
+                      className="w-full h-full font-sans overflow-visible"
+                      onMouseMove={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const mouseX = e.clientX - rect.left;
+                        const svgMouseX = (mouseX / rect.width) * svgWidth;
+                        
+                        let closestIdx = 0;
+                        let minDiff = Infinity;
+                        points.forEach((p, idx) => {
+                          const diff = Math.abs(p.x - svgMouseX);
+                          if (diff < minDiff) {
+                            minDiff = diff;
+                            closestIdx = idx;
+                          }
+                        });
+                        setActivePointIdx(closestIdx);
+                      }}
+                      onMouseLeave={() => setActivePointIdx(null)}
+                    >
+                      <defs>
+                        <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#0d9488" stopOpacity="0.4" />
+                          <stop offset="100%" stopColor="#0d9488" stopOpacity="0.0" />
+                        </linearGradient>
+                        <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+                          <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#000" floodOpacity="0.08" />
+                        </filter>
+                      </defs>
+                      
+                      {/* Gridlines */}
+                      {gridlines.map((g, idx) => (
+                        <g key={idx}>
+                          <line 
+                            x1={paddingLeft} 
+                            y1={g.y} 
+                            x2={svgWidth - paddingRight} 
+                            y2={g.y} 
+                            className="stroke-outline-variant/30" 
+                            strokeWidth="1"
+                            strokeDasharray="4 4"
+                          />
+                          <text 
+                            x={paddingLeft - 12} 
+                            y={g.y + 4} 
+                            textAnchor="end" 
+                            className="fill-on-surface-variant text-[9px] font-bold font-mono tracking-tight"
+                          >
+                            {g.label}
+                          </text>
+                        </g>
+                      ))}
+                      
+                      {/* Area fill under trendline */}
+                      {areaPath && (
+                        <path d={areaPath} fill="url(#areaGradient)" className="pointer-events-none" />
+                      )}
+                      
+                      {/* Trendline */}
+                      {linePath && (
+                        <path 
+                          d={linePath} 
+                          fill="none" 
+                          stroke="#012425" 
+                          strokeWidth="2.5" 
+                          className="pointer-events-none" 
                         />
-                        <text 
-                          x={paddingLeft - 12} 
-                          y={g.y + 4} 
-                          textAnchor="end" 
-                          className="fill-on-surface-variant text-[9px] font-bold font-mono tracking-tight"
+                      )}
+                      
+                      {/* Interactive indicators */}
+                      {activePoint && (
+                        <g className="pointer-events-none">
+                          {/* Vertical tracking line */}
+                          <line 
+                            x1={activePoint.x} 
+                            y1={paddingTop} 
+                            x2={activePoint.x} 
+                            y2={paddingTop + plotHeight} 
+                            className="stroke-primary/40" 
+                            strokeWidth="1.5" 
+                            strokeDasharray="3 3"
+                          />
+                          
+                          {/* Shimmer dot on the line */}
+                          <circle 
+                            cx={activePoint.x} 
+                            cy={activePoint.y} 
+                            r={6} 
+                            fill="#ffffff" 
+                            stroke="#012425" 
+                            strokeWidth="3" 
+                          />
+                          <circle 
+                            cx={activePoint.x} 
+                            cy={activePoint.y} 
+                            r={12} 
+                            fill="#0d9488" 
+                            fillOpacity="0.2" 
+                          />
+                        </g>
+                      )}
+                      
+                      {/* X-axis labels */}
+                      {points.map((p, idx) => (
+                        <text
+                          key={idx}
+                          x={p.x}
+                          y={svgHeight - 14}
+                          textAnchor="middle"
+                          className={`text-[10px] font-bold tracking-wide transition-all ${activePointIdx === idx ? 'fill-primary font-extrabold' : 'fill-on-surface-variant'}`}
                         >
-                          {g.label}
+                          {p.label}
+                        </text>
+                      ))}
+                      
+                      {/* Tooltip Overlay */}
+                      {activePoint && (
+                        <g className="animate-fadeIn pointer-events-none">
+                          <rect
+                            x={activePoint.x - 55}
+                            y={activePoint.y - 38}
+                            width={110}
+                            height={28}
+                            fill="#1e293b"
+                            rx={4}
+                          />
+                          <text
+                            x={activePoint.x}
+                            y={activePoint.y - 25}
+                            textAnchor="middle"
+                            fill="#ffffff"
+                            className="text-[9px] font-mono"
+                          >
+                            {activePoint.label}
+                          </text>
+                          <text
+                            x={activePoint.x}
+                            y={activePoint.y - 14}
+                            textAnchor="middle"
+                            fill="#0d9488"
+                            className="text-[10px] font-bold font-mono"
+                          >
+                            ₹{activePoint.amount.toLocaleString('en-IN')}
+                          </text>
+                          <path
+                            d={`M ${activePoint.x - 4} ${activePoint.y - 10} L ${activePoint.x} ${activePoint.y - 6} L ${activePoint.x + 4} ${activePoint.y - 10} Z`}
+                            fill="#1e293b"
+                          />
+                        </g>
+                      )}
+                      
+                      {/* Axis boundary line */}
+                      <line 
+                        x1={paddingLeft} 
+                        y1={paddingTop + plotHeight} 
+                        x2={svgWidth - paddingRight} 
+                        y2={paddingTop + plotHeight} 
+                        className="stroke-outline-variant" 
+                        strokeWidth="1.5"
+                      />
+                    </svg>
+                  </div>
+                );
+              })()
+            )}
+          </div>
+        )}
+
+        {chartTab === 'breakdown' && (
+          <div className="w-full bg-surface-container-low/20 border border-outline-variant/60 p-6 rounded-none select-none flex flex-col md:flex-row items-center justify-around gap-8">
+            {(() => {
+              const segmentSales = matrix.segmentSales || [];
+              const totalRevenueSum = segmentSales.reduce((sum, s) => sum + s.amount, 0);
+
+              const svgWidth = 360;
+              const svgHeight = 220;
+              const donutX = 180;
+              const donutY = 110;
+              const donutRadius = 60;
+              const donutCircumference = 2 * Math.PI * donutRadius;
+
+              let accumulatedPercent = 0;
+              const donutSegments = segmentSales.map((s, idx) => {
+                const strokeDashoffset = donutCircumference - (s.percentage / 100) * donutCircumference;
+                const rotation = (accumulatedPercent / 100) * 360;
+                accumulatedPercent += s.percentage;
+                
+                const color = idx === 0 ? '#012425' : idx === 1 ? '#80543c' : idx === 2 ? '#B07D05' : '#717878';
+                
+                return { ...s, strokeDashoffset, rotation, color };
+              });
+
+              const hoveredData = hoveredSegment !== null ? donutSegments[hoveredSegment] : null;
+
+              return (
+                <>
+                  <div className="relative w-[280px] h-[220px] shrink-0">
+                    <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-full font-sans overflow-visible">
+                      <circle cx={donutX} cy={donutY} r={donutRadius} fill="transparent" stroke="#f4f3f3" strokeWidth="16" />
+                      
+                      {donutSegments.map((seg, idx) => (
+                        <circle
+                          key={idx}
+                          cx={donutX}
+                          cy={donutY}
+                          r={donutRadius}
+                          fill="transparent"
+                          stroke={seg.color}
+                          strokeWidth={hoveredSegment === idx ? 22 : 16}
+                          strokeDasharray={donutCircumference}
+                          strokeDashoffset={seg.strokeDashoffset}
+                          transform={`rotate(${seg.rotation - 90} ${donutX} ${donutY})`}
+                          className="transition-all duration-300 cursor-pointer origin-center"
+                          onMouseEnter={() => setHoveredSegment(idx)}
+                          onMouseLeave={() => setHoveredSegment(null)}
+                        />
+                      ))}
+                      
+                      {/* Donut Center text HUD */}
+                      <g className="pointer-events-none">
+                        <text x={donutX} y={donutY - 14} textAnchor="middle" className="fill-ink-muted text-[10px] uppercase font-bold tracking-widest">
+                          {hoveredData ? hoveredData.label : 'Total Revenue'}
+                        </text>
+                        <text x={donutX} y={donutY + 8} textAnchor="middle" className="fill-primary text-sm font-extrabold font-serif">
+                          ₹{(hoveredData ? hoveredData.amount : totalRevenueSum).toLocaleString('en-IN')}
+                        </text>
+                        <text x={donutX} y={donutY + 24} textAnchor="middle" className="fill-secondary font-mono text-[10px] font-bold">
+                          {hoveredData ? `${hoveredData.percentage}% of Sales` : 'Garment Metrics'}
                         </text>
                       </g>
-                    ))}
-                    
-                    {/* Rendering the data bars */}
-                    {chartBars.map((bar, index) => {
-                      const barHeight = (bar.amount / roundedMax) * plotHeight;
-                      const barX = paddingLeft + index * barSpacing + (barSpacing - barWidth) / 2;
-                      const barY = paddingTop + plotHeight - barHeight;
-                      const isHovered = hoveredIndex === index;
-                      
-                      return (
-                        <g key={index}>
-                          {/* Invisible hover capture block to expand mouse region */}
-                          <rect
-                            x={paddingLeft + index * barSpacing}
-                            y={paddingTop}
-                            width={barSpacing}
-                            height={plotHeight}
-                            className="fill-transparent cursor-pointer"
-                            onMouseEnter={() => setHoveredIndex(index)}
-                            onMouseLeave={() => setHoveredIndex(null)}
-                          />
-                          
-                          {/* The actual visual data bar */}
-                          <rect
-                            x={barX}
-                            y={barY}
-                            width={barWidth}
-                            height={Math.max(2, barHeight)} // min 2px height for visual feedback
-                            rx={4}
-                            fill={isHovered ? 'url(#barHoverGradient)' : 'url(#barGradient)'}
-                            filter="url(#shadow)"
-                            className="transition-all duration-300 pointer-events-none"
-                          />
-                          
-                          {/* X-axis labels centered below each bar */}
-                          <text
-                            x={barX + barWidth / 2}
-                            y={svgHeight - 14}
-                            textAnchor="middle"
-                            className={`text-[10px] font-bold tracking-wide transition-all ${isHovered ? 'fill-primary font-extrabold' : 'fill-on-surface-variant'}`}
-                          >
-                            {bar.label}
-                          </text>
-                          
-                          {/* Custom Interactive Tooltip */}
-                          {isHovered && (
-                            <g className="animate-fadeIn pointer-events-none">
-                              <rect
-                                x={barX + barWidth / 2 - 50}
-                                y={barY - 32}
-                                width={100}
-                                height={24}
-                                fill="#1e293b"
-                                rx={4}
-                                className="shadow-lg"
-                              />
-                              <text
-                                x={barX + barWidth / 2}
-                                y={barY - 16}
-                                textAnchor="middle"
-                                fill="#ffffff"
-                                className="text-[10px] font-bold font-mono"
-                              >
-                                ₹{bar.amount.toLocaleString('en-IN')}
-                              </text>
-                              {/* Drop shadow caret indicator pointer arrow */}
-                              <path
-                                d={`M ${barX + barWidth / 2 - 4} ${barY - 8} L ${barX + barWidth / 2} ${barY - 4} L ${barX + barWidth / 2 + 4} ${barY - 8} Z`}
-                                fill="#1e293b"
-                              />
-                            </g>
-                          )}
-                        </g>
-                      );
-                    })}
-                    
-                    {/* Bottom axis solid boundary line */}
-                    <line 
-                      x1={paddingLeft} 
-                      y1={paddingTop + plotHeight} 
-                      x2={svgWidth - paddingRight} 
-                      y2={paddingTop + plotHeight} 
-                      className="stroke-outline-variant" 
-                      strokeWidth="1.5"
-                    />
-                  </svg>
-                </div>
+                    </svg>
+                  </div>
+                  
+                  {/* Donut Chart Legend Panel */}
+                  <div className="flex-grow space-y-4 max-w-sm w-full">
+                    <h4 className="font-serif text-sm font-bold text-primary uppercase tracking-wide border-b border-outline-variant/60 pb-2">Sales Contribution</h4>
+                    <div className="grid grid-cols-1 gap-3">
+                      {donutSegments.map((seg, idx) => (
+                        <div 
+                          key={idx}
+                          onMouseEnter={() => setHoveredSegment(idx)}
+                          onMouseLeave={() => setHoveredSegment(null)}
+                          className={`flex justify-between items-center p-2 border transition-all cursor-pointer ${hoveredSegment === idx ? 'bg-surface-container-low border-outline' : 'bg-transparent border-transparent'}`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="w-3.5 h-3.5" style={{ backgroundColor: seg.color }} />
+                            <span className="text-xs font-bold text-on-surface">{seg.label}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-xs font-bold font-mono text-primary mr-3">₹{seg.amount.toLocaleString('en-IN')}</span>
+                            <span className="text-[10px] font-extrabold font-mono text-secondary bg-secondary-fixed/30 px-1.5 py-0.5 rounded-sm">{seg.percentage}%</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
               );
-            })()
-          )}
-        </div>
+            })()}
+          </div>
+        )}
+
+        {chartTab === 'pipeline' && (
+          <div className="w-full bg-surface-container-low/20 border border-outline-variant/60 p-6 rounded-none select-none flex flex-col md:flex-row items-center justify-around gap-8">
+            {(() => {
+              const pipelineRings = matrix.pipelineRings || [];
+              
+              const svgWidth = 360;
+              const svgHeight = 220;
+              const center = 180;
+              
+              const rings = [
+                { label: 'Delivered & Closed', color: '#2D6A4F', radius: 75, data: pipelineRings[3] },
+                { label: 'Ready for Trial', color: '#B07D05', radius: 58, data: pipelineRings[2] },
+                { label: 'In Production', color: '#80543c', radius: 41, data: pipelineRings[1] },
+                { label: 'Pending Receipt', color: '#9B2226', radius: 24, data: pipelineRings[0] }
+              ];
+
+              const hoveredData = hoveredRing !== null ? rings[hoveredRing] : null;
+
+              return (
+                <>
+                  <div className="relative w-[280px] h-[220px] shrink-0">
+                    <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-full font-sans overflow-visible">
+                      {rings.map((ring, idx) => {
+                        const circ = 2 * Math.PI * ring.radius;
+                        const pct = ring.data ? ring.data.percentage : 0;
+                        const strokeDashoffset = circ - (pct / 100) * circ;
+                        const isHovered = hoveredRing === idx;
+
+                        return (
+                          <g key={idx}>
+                            {/* Grey Track Background */}
+                            <circle
+                              cx={center}
+                              cy={center}
+                              r={ring.radius}
+                              fill="transparent"
+                              stroke={ring.color}
+                              strokeWidth={isHovered ? 12 : 8}
+                              strokeOpacity="0.1"
+                            />
+                            {/* Active Ring Stroke Fill */}
+                            <circle
+                              cx={center}
+                              cy={center}
+                              r={ring.radius}
+                              fill="transparent"
+                              stroke={ring.color}
+                              strokeWidth={isHovered ? 12 : 8}
+                              strokeLinecap="round"
+                              strokeDasharray={circ}
+                              strokeDashoffset={strokeDashoffset}
+                              transform={`rotate(-90 ${center} ${center})`}
+                              className="transition-all duration-300 cursor-pointer"
+                              onMouseEnter={() => setHoveredRing(idx)}
+                              onMouseLeave={() => setHoveredRing(null)}
+                            />
+                          </g>
+                        );
+                      })}
+                      
+                      {/* Ring HUD Center Indicator */}
+                      <g className="pointer-events-none">
+                        <text x={center} y={center - 10} textAnchor="middle" className="fill-ink-muted text-[9px] uppercase font-bold tracking-widest">
+                          {hoveredData ? hoveredData.label : 'Active Pipeline'}
+                        </text>
+                        <text x={center} y={center + 12} textAnchor="middle" className="fill-primary text-lg font-extrabold font-serif">
+                          {hoveredData ? `${hoveredData.data.count} Orders` : `${pipelineRings.reduce((sum, r) => sum + r.count, 0)} Total`}
+                        </text>
+                      </g>
+                    </svg>
+                  </div>
+                  
+                  {/* Radial Rings Legend Panel */}
+                  <div className="flex-grow space-y-4 max-w-sm w-full">
+                    <h4 className="font-serif text-sm font-bold text-primary uppercase tracking-wide border-b border-outline-variant/60 pb-2">Status Ring Distribution</h4>
+                    <div className="grid grid-cols-1 gap-2.5">
+                      {rings.map((ring, idx) => (
+                        <div
+                          key={idx}
+                          onMouseEnter={() => setHoveredRing(idx)}
+                          onMouseLeave={() => setHoveredRing(null)}
+                          className={`flex justify-between items-center p-2.5 border transition-all cursor-pointer ${hoveredRing === idx ? 'bg-surface-container-low border-outline' : 'bg-transparent border-transparent'}`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: ring.color }} />
+                            <span className="text-xs font-bold text-on-surface">{ring.label}</span>
+                          </div>
+                          <div className="text-right flex items-center gap-3">
+                            <span className="text-xs font-extrabold font-mono text-primary">{ring.data?.count || 0}</span>
+                            <span className="text-[10px] font-bold text-on-surface-variant font-mono">({ring.data?.percentage || 0}%)</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        )}
         <div className="h-4" /> {/* Layout safety separation spacing filler */}
       </section>
 
