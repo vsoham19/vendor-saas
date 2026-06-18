@@ -629,7 +629,7 @@ export default function AnalyticsDashboardPage() {
                           strokeDasharray={donutCircumference}
                           strokeDashoffset={seg.strokeDashoffset}
                           transform={`rotate(${seg.rotation - 90} ${donutX} ${donutY})`}
-                          className="transition-all duration-300 cursor-pointer origin-center"
+                          className="transition-all duration-300 cursor-pointer"
                           onMouseEnter={() => setHoveredSegment(idx)}
                           onMouseLeave={() => setHoveredSegment(null)}
                         />
@@ -686,7 +686,8 @@ export default function AnalyticsDashboardPage() {
               
               const svgWidth = 360;
               const svgHeight = 220;
-              const center = 180;
+              const centerX = 180;
+              const centerY = 110;
               
               const rings = [
                 { label: 'Delivered & Closed', color: '#2D6A4F', radius: 75, data: pipelineRings[3] },
@@ -711,8 +712,8 @@ export default function AnalyticsDashboardPage() {
                           <g key={idx}>
                             {/* Grey Track Background */}
                             <circle
-                              cx={center}
-                              cy={center}
+                              cx={centerX}
+                              cy={centerY}
                               r={ring.radius}
                               fill="transparent"
                               stroke={ring.color}
@@ -721,8 +722,8 @@ export default function AnalyticsDashboardPage() {
                             />
                             {/* Active Ring Stroke Fill */}
                             <circle
-                              cx={center}
-                              cy={center}
+                              cx={centerX}
+                              cy={centerY}
                               r={ring.radius}
                               fill="transparent"
                               stroke={ring.color}
@@ -730,7 +731,7 @@ export default function AnalyticsDashboardPage() {
                               strokeLinecap="round"
                               strokeDasharray={circ}
                               strokeDashoffset={strokeDashoffset}
-                              transform={`rotate(-90 ${center} ${center})`}
+                              transform={`rotate(-90 ${centerX} ${centerY})`}
                               className="transition-all duration-300 cursor-pointer"
                               onMouseEnter={() => setHoveredRing(idx)}
                               onMouseLeave={() => setHoveredRing(null)}
@@ -741,10 +742,10 @@ export default function AnalyticsDashboardPage() {
                       
                       {/* Ring HUD Center Indicator */}
                       <g className="pointer-events-none">
-                        <text x={center} y={center - 10} textAnchor="middle" className="fill-ink-muted text-[9px] uppercase font-bold tracking-widest">
+                        <text x={centerX} y={centerY - 10} textAnchor="middle" className="fill-ink-muted text-[9px] uppercase font-bold tracking-widest">
                           {hoveredData ? hoveredData.label : 'Active Pipeline'}
                         </text>
-                        <text x={center} y={center + 12} textAnchor="middle" className="fill-primary text-lg font-extrabold font-serif">
+                        <text x={centerX} y={centerY + 12} textAnchor="middle" className="fill-primary text-lg font-extrabold font-serif">
                           {hoveredData ? `${hoveredData.data.count} Orders` : `${pipelineRings.reduce((sum, r) => sum + r.count, 0)} Total`}
                         </text>
                       </g>
