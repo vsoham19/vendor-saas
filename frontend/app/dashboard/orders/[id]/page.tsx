@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useOrders } from '@/hooks/useOrders';
 import { supabase } from '@/utils/supabase';
+import { sendOrderStatusUpdate } from '@/utils/whatsapp';
 
 interface LineItem {
   id: string;
@@ -73,9 +74,27 @@ export default function OrderDetailsPage() {
       if (error) throw new Error(error.message);
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
+
+      // Trigger status update WhatsApp in the background
+      const updatedOrder = data?.[0];
+      if (updatedOrder && orderDetails?.customers) {
+        const customer = orderDetails.customers;
+        
+        supabase.from('order_items').select('item_name').eq('order_id', orderId).then(({ data: items }) => {
+          const itemSummary = items && items.length > 0 ? items.map(i => i.item_name).join(', ') : null;
+          
+          sendOrderStatusUpdate(
+            customer.name,
+            updatedOrder.order_number || '',
+            itemSummary,
+            updatedOrder.status,
+            customer.phone
+          ).catch(err => console.error('Failed to send order status WhatsApp notification:', err));
+        });
+      }
     }
   });
 

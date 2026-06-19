@@ -1,0 +1,16 @@
+{
+  "name": "whatsapp-bridge",
+  "version": "1.0.0",
+  "description": "Lightweight, self-hosted WhatsApp Web API bridge using Baileys socket client",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.6.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pino": "^8.21.0",
+    "qrcode": "^1.5.3"
+  }
+}

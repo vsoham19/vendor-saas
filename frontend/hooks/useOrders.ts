@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase';
 import { useAuthStore } from '@/store/authStore';
+import { sendOrderStatusUpdate, sendPaymentReceipt } from '@/utils/whatsapp';
 
 export interface OrderInput {
   customer_id: string;
@@ -104,6 +105,36 @@ export function useCreateOrder() {
         if (payErr) throw new Error(payErr.message);
       }
 
+      // Step D: Dispatch WhatsApp confirmation alerts in the background (non-blocking)
+      Promise.all([
+        supabase.from('customers').select('name, phone').eq('id', payload.order.customer_id).single(),
+        supabase.from('orders').select('order_number, amount_outstanding').eq('id', newOrder.id).single()
+      ]).then(([custRes, orderRes]) => {
+        if (custRes.data && orderRes.data) {
+          const customer = custRes.data;
+          const order = orderRes.data;
+
+          sendOrderStatusUpdate(
+            customer.name,
+            order.order_number || '',
+            payload.order.description,
+            'pending',
+            customer.phone
+          ).catch(err => console.error('Failed to send order created WhatsApp notification:', err));
+
+          if (payload.advance && payload.advance.amount > 0) {
+            sendPaymentReceipt(
+              customer.name,
+              payload.advance.amount,
+              payload.advance.mode,
+              order.order_number || '',
+              order.amount_outstanding || 0,
+              customer.phone
+            ).catch(err => console.error('Failed to send advance payment WhatsApp receipt:', err));
+          }
+        }
+      }).catch(err => console.error('Error fetching customer/order details for WhatsApp dispatch:', err));
+
       return newOrder;
     },
     onSuccess: (_, variables) => {
@@ -120,6 +151,29 @@ export function useRecordPayment() {
     mutationFn: async (payload: { order_id: string; customer_id: string; amount: number; payment_mode: string; reference_note: string | null }) => {
       const { data, error } = await supabase.from('payments').insert([payload]).select();
       if (error) throw new Error(error.message);
+
+      const newPayment = data?.[0];
+      if (newPayment) {
+        Promise.all([
+          supabase.from('customers').select('name, phone').eq('id', payload.customer_id).single(),
+          supabase.from('orders').select('order_number, amount_outstanding').eq('id', payload.order_id).single()
+        ]).then(([custRes, orderRes]) => {
+          if (custRes.data && orderRes.data) {
+            const customer = custRes.data;
+            const order = orderRes.data;
+
+            sendPaymentReceipt(
+              customer.name,
+              payload.amount,
+              payload.payment_mode,
+              order.order_number || '',
+              order.amount_outstanding || 0,
+              customer.phone
+            ).catch(err => console.error('Failed to send payment receipt WhatsApp notification:', err));
+          }
+        }).catch(err => console.error('Error fetching details for payment WhatsApp receipt:', err));
+      }
+
       return data;
     },
     onSuccess: (data) => {
