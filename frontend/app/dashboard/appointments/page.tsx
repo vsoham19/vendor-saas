@@ -42,6 +42,12 @@ export default function AppointmentCalendarPage() {
   const [notesText, setNotesText] = useState('');
   const [mutationError, setMutationError] = useState<string | null>(null);
 
+  // Details Modal and Management Overlay State
+  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentItem | null>(null);
+  const [isManageOpen, setIsManageOpen] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [rescheduleTimeSlot, setRescheduleTimeSlot] = useState('');
+
   // Fetch Appointments from Supabase
   const { data: appointments = [], isLoading } = useQuery<AppointmentItem[]>({
     queryKey: ['appointments-master-list', user?.vendorId],
@@ -153,6 +159,61 @@ export default function AppointmentCalendarPage() {
     }
   });
 
+  // Supabase Mutation: Update appointment status, scheduled date or time slot
+  const updateAppointmentMutation = useMutation({
+    mutationFn: async (payload: {
+      id: string;
+      status?: 'scheduled' | 'completed' | 'cancelled' | 'no_show';
+      scheduled_date?: string;
+      time_slot?: string | null;
+    }) => {
+      const { data, error } = await supabase
+        .from('appointments')
+        .update(payload)
+        .eq('id', payload.id)
+        .select();
+
+      if (error) throw new Error(error.message);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['appointments-master-list'] });
+      setSelectedAppointment(null);
+      setIsManageOpen(false);
+    }
+  });
+
+  // Background Sweep: Automatically set past scheduled appointments to completed
+  React.useEffect(() => {
+    if (appointments.length === 0) return;
+    const now = new Date();
+    const pastScheduled = appointments.filter(appt => {
+      if (appt.status !== 'scheduled') return false;
+      const apptDate = new Date(appt.scheduled_date);
+      return apptDate < now;
+    });
+
+    if (pastScheduled.length > 0) {
+      const pastIds = pastScheduled.map(appt => appt.id);
+      const sweepPastAppointments = async () => {
+        try {
+          const { error } = await supabase
+            .from('appointments')
+            .update({ status: 'completed' })
+            .in('id', pastIds);
+          if (error) {
+            console.error('Failed to auto-complete past appointments:', error);
+          } else {
+            queryClient.invalidateQueries({ queryKey: ['appointments-master-list'] });
+          }
+        } catch (err) {
+          console.error('Failed to auto-complete past appointments error:', err);
+        }
+      };
+      sweepPastAppointments();
+    }
+  }, [appointments, queryClient]);
+
   return (
     <div className="space-y-6">
       {/* Title Header Bar */}
@@ -214,13 +275,20 @@ export default function AppointmentCalendarPage() {
             <p className="p-8 text-center text-sm text-ink-muted">No consultations found matching your filters.</p>
           ) : (
             filteredAppointments.map(appt => (
-              <div key={appt.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-0 hover:bg-zinc-50/50 transition-colors zebra-row text-sm">
+              <div 
+                key={appt.id} 
+                onClick={() => {
+                  setSelectedAppointment(appt);
+                  setIsManageOpen(false);
+                }}
+                className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-0 hover:bg-zinc-50 cursor-pointer transition-colors zebra-row text-sm"
+              >
                 <div className="space-y-1 sm:max-w-md">
                   <div className="flex gap-2 items-center text-xs font-mono font-bold text-secondary">
                     <span className="material-symbols-outlined text-sm">schedule</span>
                     <span>{new Date(appt.scheduled_date).toLocaleDateString('en-IN', {day: 'numeric', month: 'short'})} | {appt.time_slot || 'Flexible Window'}</span>
                   </div>
-                  <h4 className="font-bold text-primary text-base">{appt.title}</h4>
+                  <h4 className="font-bold text-primary text-base hover:underline">{appt.title}</h4>
                   <p className="text-xs text-on-surface-variant font-medium">Customer Profile: <span className="text-on-surface font-bold">{appt.customer_name}</span> ({appt.customer_phone})</p>
                   {appt.notes && <p className="text-xs text-ink-muted italic pt-1">Memo: &quot;{appt.notes}&quot;</p>}
                 </div>
@@ -231,7 +299,12 @@ export default function AppointmentCalendarPage() {
                   }`}>
                     {appt.appointment_type === 'walk_in' ? 'Walk In Consultation' : `Order Trial: ${appt.stage?.replace('_', ' ')}`}
                   </span>
-                  <span className="text-[10px] uppercase font-bold tracking-widest text-ink-muted bg-surface-container px-2 py-0.5">{appt.status}</span>
+                  <span className={`text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 rounded-sm ${
+                    appt.status === 'scheduled' ? 'bg-primary/10 text-primary border border-primary/20' :
+                    appt.status === 'completed' ? 'bg-green-50 text-green-700 border border-green-200' :
+                    appt.status === 'cancelled' ? 'bg-red-50 text-red-700 border border-red-200' :
+                    'bg-amber-50 text-amber-700 border border-amber-200'
+                  }`}>{appt.status}</span>
                 </div>
               </div>
             ))
@@ -240,26 +313,79 @@ export default function AppointmentCalendarPage() {
       ) : (
         
         /* PRESENTATION SUB-VIEW B: SIMPLE COMPACT MONOTONE MONTH-GRID CELL ARCHITECTURE */
-        <div className="bg-surface-container-lowest border border-zinc-200 p-4 shadow-xs">
-          <div className="text-center font-serif text-lg font-bold text-primary mb-4">June 2026</div>
-          <div className="grid grid-cols-7 gap-1 text-center font-bold text-[10px] tracking-wider text-on-surface-variant uppercase border-b border-zinc-100 pb-2 mb-2">
-            <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
-          </div>
-          <div className="grid grid-cols-7 gap-2 min-h-[260px] text-xs font-medium text-ink-muted">
-            {/* Minimal architectural block representation sample matrix mapping June 2026 calendar days explicitly */}
-            {Array.from({ length: 31 }).map((_, i) => {
-              const dayNum = i + 1;
-              const hasAppt = dayNum === 15 || dayNum === 16;
-              return (
-                <div key={i} className={`min-h-[50px] p-1 border border-zinc-100 flex flex-col justify-between items-start transition-colors ${hasAppt ? 'bg-secondary-fixed/20 border-secondary/30' : ''}`}>
-                  <span className={`font-bold ${hasAppt ? 'text-secondary' : 'text-zinc-400'}`}>{dayNum}</span>
-                  {hasAppt && <div className="h-2 w-2 rounded-full bg-secondary self-end mr-1 mb-1"></div>}
-                </div>
-              );
-            })}
-          </div>
-          <p className="text-[10px] text-ink-muted italic mt-4 text-center">Dates containing dots show tailored trial check sessions. Select list view to read individual client profiles.</p>
-        </div>
+        (() => {
+          const calNow = new Date();
+          const calYear = calNow.getFullYear();
+          const calMonth = calNow.getMonth(); // 0-indexed
+          const calMonthName = calNow.toLocaleString('en-IN', { month: 'long' });
+          const totalDays = new Date(calYear, calMonth + 1, 0).getDate();
+          const firstDayIndex = new Date(calYear, calMonth, 1).getDay(); // 0 = Sun
+
+          const cells: (number | null)[] = [];
+          for (let i = 0; i < firstDayIndex; i++) {
+            cells.push(null);
+          }
+          for (let i = 1; i <= totalDays; i++) {
+            cells.push(i);
+          }
+
+          return (
+            <div className="bg-surface-container-lowest border border-zinc-200 p-4 shadow-xs">
+              <div className="text-center font-serif text-lg font-bold text-primary mb-4">{calMonthName} {calYear}</div>
+              <div className="grid grid-cols-7 gap-1 text-center font-bold text-[10px] tracking-wider text-on-surface-variant uppercase border-b border-zinc-100 pb-2 mb-2">
+                <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+              </div>
+              <div className="grid grid-cols-7 gap-2 min-h-[300px] text-xs font-medium text-ink-muted">
+                {cells.map((dayNum, i) => {
+                  if (dayNum === null) {
+                    return <div key={`empty-${i}`} className="min-h-[60px] bg-zinc-50/40 border border-zinc-50"></div>;
+                  }
+
+                  const dayAppts = appointments.filter(appt => {
+                    const d = new Date(appt.scheduled_date);
+                    return d.getDate() === dayNum && d.getMonth() === calMonth && d.getFullYear() === calYear;
+                  });
+
+                  const hasAppt = dayAppts.length > 0;
+
+                  return (
+                    <div 
+                      key={`day-${dayNum}`} 
+                      className={`min-h-[60px] p-1 border border-zinc-100 flex flex-col justify-between items-start transition-colors ${
+                        hasAppt ? 'bg-secondary-fixed/5 border-secondary/20' : 'hover:bg-zinc-50'
+                      }`}
+                    >
+                      <span className={`font-bold text-[10px] ${hasAppt ? 'text-secondary' : 'text-zinc-400'}`}>{dayNum}</span>
+                      
+                      {hasAppt && (
+                        <div className="w-full space-y-1 mt-1">
+                          {dayAppts.slice(0, 3).map(appt => (
+                            <button
+                              key={appt.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedAppointment(appt);
+                                setIsManageOpen(false);
+                              }}
+                              title={appt.title}
+                              className="w-full text-left truncate text-[9px] bg-secondary text-white font-semibold px-1 py-0.5 rounded-sm hover:brightness-95 transition-all block"
+                            >
+                              {appt.title}
+                            </button>
+                          ))}
+                          {dayAppts.length > 3 && (
+                            <span className="text-[8px] text-ink-muted block text-right font-bold">+{dayAppts.length - 3} more</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-ink-muted italic mt-4 text-center">Click on any colored trial banner in the cells above to read profile specifications and manage appointments.</p>
+            </div>
+          );
+        })()
       )}
 
       {/* OVERLAY DRAWER SHEET: OVERLAY APPOINTMENT SCHEDULER ENTRY FORM */}
@@ -346,6 +472,208 @@ export default function AppointmentCalendarPage() {
                 <button type="submit" disabled={scheduleAppointmentMutation.isPending} className="flex-1 min-h-[44px] bg-primary text-white text-xs uppercase font-bold disabled:opacity-50">Commit Booking</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* DETAILS CARD MODAL */}
+      {selectedAppointment && (
+        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-zinc-950/40 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-background w-full sm:max-w-md p-6 border-t sm:border border-outline-variant max-h-[90vh] overflow-y-auto space-y-5 shadow-xl">
+            
+            {/* Header */}
+            <div className="flex justify-between items-start border-b border-outline-variant pb-3">
+              <div>
+                <span className={`px-2 py-0.5 text-[9px] font-bold tracking-wider uppercase border rounded-xs ${
+                  selectedAppointment.appointment_type === 'walk_in' ? 'border-outline text-outline bg-zinc-50' : 'border-secondary text-secondary bg-orange-50/20'
+                }`}>
+                  {selectedAppointment.appointment_type === 'walk_in' ? 'Walk In Consultation' : 'Order Fitting Trial'}
+                </span>
+                <h3 className="font-serif text-lg font-bold text-primary mt-2">{selectedAppointment.title}</h3>
+              </div>
+              <button 
+                onClick={() => {
+                  setSelectedAppointment(null);
+                  setIsManageOpen(false);
+                }} 
+                className="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors"
+              >
+                close
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-4 bg-zinc-50 p-3 border border-zinc-100 rounded-xs">
+                <div>
+                  <span className="text-[9px] uppercase font-bold text-ink-muted block">Scheduled Date</span>
+                  <span className="font-bold text-primary text-xs">
+                    {new Date(selectedAppointment.scheduled_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[9px] uppercase font-bold text-ink-muted block">Time Slot</span>
+                  <span className="font-bold text-primary text-xs">{selectedAppointment.time_slot || 'Flexible Window'}</span>
+                </div>
+              </div>
+
+              <div className="space-y-2 border-b border-outline-variant pb-3">
+                <span className="text-[9px] uppercase font-bold text-ink-muted block">Client Details</span>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="font-bold text-on-surface text-sm">{selectedAppointment.customer_name}</p>
+                    <p className="font-mono text-on-surface-variant">{selectedAppointment.customer_phone}</p>
+                  </div>
+                  <a 
+                    href={`/dashboard/customers?id=${selectedAppointment.customer_id}`}
+                    className="text-[9px] font-bold uppercase tracking-wider text-secondary bg-orange-50 border border-secondary/20 px-2.5 py-1 hover:bg-orange-100 transition-all rounded-xs"
+                  >
+                    View Profile
+                  </a>
+                </div>
+              </div>
+
+              {selectedAppointment.order_number && (
+                <div className="space-y-2 border-b border-outline-variant pb-3">
+                  <span className="text-[9px] uppercase font-bold text-ink-muted block">Linked Order</span>
+                  <p className="font-bold text-on-surface text-sm">Invoice No: {selectedAppointment.order_number}</p>
+                </div>
+              )}
+
+              {selectedAppointment.stage && (
+                <div className="space-y-1">
+                  <span className="text-[9px] uppercase font-bold text-ink-muted block">Production Checkpoint Stage</span>
+                  <p className="font-medium text-secondary uppercase tracking-wide text-[9px] bg-orange-50 border border-secondary/15 inline-block px-2 py-0.5 rounded-xs">
+                    {selectedAppointment.stage.replace('_', ' ')}
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <span className="text-[9px] uppercase font-bold text-ink-muted block">Internal Notes</span>
+                <p className="text-on-surface-variant italic bg-zinc-50 p-2.5 border border-zinc-100/60 rounded-xs">
+                  {selectedAppointment.notes ? `"${selectedAppointment.notes}"` : 'No custom notes annotated for this fitting session.'}
+                </p>
+              </div>
+
+              <div className="flex justify-between items-center border-t border-outline-variant pt-3">
+                <div>
+                  <span className="text-[9px] uppercase font-bold text-ink-muted block">Current Status</span>
+                  <span className={`text-[9px] uppercase font-extrabold tracking-widest px-2.5 py-0.5 border rounded-xs ${
+                    selectedAppointment.status === 'scheduled' ? 'bg-primary/10 text-primary border-primary/20' :
+                    selectedAppointment.status === 'completed' ? 'bg-green-50 text-green-700 border-green-200' :
+                    selectedAppointment.status === 'cancelled' ? 'bg-red-50 text-red-700 border-red-200' :
+                    'bg-amber-50 text-amber-700 border-amber-200'
+                  }`}>
+                    {selectedAppointment.status}
+                  </span>
+                </div>
+                
+                {!isManageOpen ? (
+                  <button 
+                    onClick={() => {
+                      setIsManageOpen(true);
+                      setRescheduleDate(selectedAppointment.scheduled_date.substring(0, 10));
+                      setRescheduleTimeSlot(selectedAppointment.time_slot || '');
+                    }}
+                    className="min-h-[36px] px-4 bg-primary text-white text-xs font-bold uppercase tracking-wider hover:bg-opacity-95 flex items-center gap-1.5 cursor-pointer rounded-xs"
+                  >
+                    <span className="material-symbols-outlined text-base">settings</span> Manage Schedule
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => setIsManageOpen(false)}
+                    className="min-h-[36px] px-4 border border-outline text-on-surface text-xs font-bold uppercase tracking-wider hover:bg-zinc-50 cursor-pointer rounded-xs"
+                  >
+                    Hide Panel
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* EXPANDABLE MANAGEMENT AND RESCHEDULING PANEL */}
+            {isManageOpen && (
+              <div className="border-t border-outline-variant pt-4 space-y-4 text-xs animate-fadeIn">
+                <h4 className="font-serif text-sm font-bold text-primary">Resolve Status Checkpoints</h4>
+                
+                {/* Resolution Action Strip */}
+                <div className="grid grid-cols-3 gap-2">
+                  <button 
+                    onClick={() => updateAppointmentMutation.mutate({
+                      id: selectedAppointment.id,
+                      status: 'completed',
+                      scheduled_date: new Date().toISOString().substring(0, 10),
+                      time_slot: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+                    })}
+                    disabled={updateAppointmentMutation.isPending}
+                    className="flex flex-col items-center justify-center p-2.5 bg-green-50 hover:bg-green-100/80 border border-green-200 text-green-800 rounded-xs transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <span className="material-symbols-outlined text-lg mb-1">check_circle</span>
+                    <span className="font-bold text-[8px] uppercase tracking-wider">Attend Now</span>
+                  </button>
+                  <button 
+                    onClick={() => updateAppointmentMutation.mutate({
+                      id: selectedAppointment.id,
+                      status: 'no_show'
+                    })}
+                    disabled={updateAppointmentMutation.isPending}
+                    className="flex flex-col items-center justify-center p-2.5 bg-amber-50 hover:bg-amber-100/80 border border-amber-200 text-amber-800 rounded-xs transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <span className="material-symbols-outlined text-lg mb-1">person_off</span>
+                    <span className="font-bold text-[8px] uppercase tracking-wider">No-Show</span>
+                  </button>
+                  <button 
+                    onClick={() => updateAppointmentMutation.mutate({
+                      id: selectedAppointment.id,
+                      status: 'cancelled'
+                    })}
+                    disabled={updateAppointmentMutation.isPending}
+                    className="flex flex-col items-center justify-center p-2.5 bg-red-50 hover:bg-red-100/80 border border-red-200 text-red-800 rounded-xs transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <span className="material-symbols-outlined text-lg mb-1">cancel</span>
+                    <span className="font-bold text-[8px] uppercase tracking-wider">Cancel</span>
+                  </button>
+                </div>
+
+                <div className="border-t border-zinc-150 my-2" />
+
+                {/* Rescheduling (Prepone / Postpone) */}
+                <h4 className="font-serif text-sm font-bold text-primary">Reschedule (Prepone / Postpone)</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-bold text-on-surface-variant uppercase">New Date</label>
+                    <input 
+                      type="date" 
+                      value={rescheduleDate} 
+                      onChange={(e) => setRescheduleDate(e.target.value)} 
+                      className="w-full min-h-[38px] px-2 bg-surface-container-low border border-outline-variant focus:outline-none focus:border-primary"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-bold text-on-surface-variant uppercase">Time Slot</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. 02:00 PM"
+                      value={rescheduleTimeSlot} 
+                      onChange={(e) => setRescheduleTimeSlot(e.target.value)} 
+                      className="w-full min-h-[38px] px-3 bg-surface-container-low border border-outline-variant focus:outline-none focus:border-primary"
+                    />
+                  </div>
+                </div>
+                <button 
+                  onClick={() => updateAppointmentMutation.mutate({
+                    id: selectedAppointment.id,
+                    scheduled_date: rescheduleDate,
+                    time_slot: rescheduleTimeSlot,
+                    status: 'scheduled'
+                  })}
+                  disabled={updateAppointmentMutation.isPending || !rescheduleDate}
+                  className="w-full min-h-[40px] bg-secondary text-white text-xs font-bold uppercase tracking-wider hover:bg-opacity-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 rounded-xs"
+                >
+                  <span className="material-symbols-outlined text-base">calendar_today</span> Save New Schedule
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
