@@ -148,17 +148,19 @@ CREATE TABLE customer_measurements (
   recorded_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Disable Row Level Security (RLS) to prevent any permission issues in verification/testing
-ALTER TABLE vendors DISABLE ROW LEVEL SECURITY;
-ALTER TABLE staff DISABLE ROW LEVEL SECURITY;
-ALTER TABLE customers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE orders DISABLE ROW LEVEL SECURITY;
-ALTER TABLE order_items DISABLE ROW LEVEL SECURITY;
-ALTER TABLE payments DISABLE ROW LEVEL SECURITY;
-ALTER TABLE appointments DISABLE ROW LEVEL SECURITY;
-ALTER TABLE measurement_templates DISABLE ROW LEVEL SECURITY;
-ALTER TABLE measurement_field_templates DISABLE ROW LEVEL SECURITY;
-ALTER TABLE customer_measurements DISABLE ROW LEVEL SECURITY;
+-- Row Level Security is fail-closed by default. After re-running this reset
+-- script you MUST apply supabase/migrations/20261114090000_enable_tenant_rls.sql
+-- so the tenant policies are recreated. Do not disable RLS again.
+ALTER TABLE vendors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE staff ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE appointments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE measurement_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE measurement_field_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer_measurements ENABLE ROW LEVEL SECURITY;
 
 -- Disable triggers temporarily during setup
 SET session_replication_role = 'replica';
@@ -324,7 +326,11 @@ UPDATE customers SET total_outstanding = 0 WHERE id = 'c1100000-0000-0000-0000-0
 
 -- Trigger function to generate order number
 CREATE OR REPLACE FUNCTION generate_order_number()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
   v_prefix TEXT;
   v_seq INTEGER;

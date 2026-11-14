@@ -1,20 +1,42 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/utils/supabase';
+import { createClient } from '@supabase/supabase-js';
 import { sendAppointmentReminder } from '@/utils/whatsapp';
 
 export async function GET(request: Request) {
-  // Optional security check using Vercel Cron token secret
+  // This job runs without a user session and needs to cross tenant boundaries,
+  // so it must use the service role client and be protected by CRON_SECRET.
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) {
+    return NextResponse.json(
+      { error: 'Server Misconfigured', message: 'CRON_SECRET is not configured.' },
+      { status: 500 }
+    );
+  }
+
   const authHeader = request.headers.get('authorization');
-  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    return NextResponse.json(
+      { error: 'Server Misconfigured', message: 'Supabase service credentials are not configured.' },
+      { status: 500 }
+    );
+  }
+
+  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 
   try {
     const now = new Date();
     // Query appointments occurring in the next 24 hours
     const targetTime = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     
-    const { data: appointments, error } = await supabase
+    const { data: appointments, error } = await supabaseAdmin
       .from('appointments')
       .select('*, customers(name, phone)')
       .eq('status', 'scheduled')
@@ -49,7 +71,7 @@ export async function GET(request: Request) {
 
         if (success) {
           // Update flag to prevent duplicate dispatches
-          await supabase
+          await supabaseAdmin
             .from('appointments')
             .update({ whatsapp_reminder_sent: true })
             .eq('id', appt.id);

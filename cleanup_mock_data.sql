@@ -86,23 +86,28 @@ BEFORE INSERT OR UPDATE ON staff
 FOR EACH ROW
 EXECUTE FUNCTION sync_staff_name();
 
--- Step 7: Ensure RLS is disabled for all tables (for the anon key to work)
-ALTER TABLE vendors DISABLE ROW LEVEL SECURITY;
-ALTER TABLE staff DISABLE ROW LEVEL SECURITY;
-ALTER TABLE customers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE orders DISABLE ROW LEVEL SECURITY;
-ALTER TABLE order_items DISABLE ROW LEVEL SECURITY;
-ALTER TABLE payments DISABLE ROW LEVEL SECURITY;
-ALTER TABLE appointments DISABLE ROW LEVEL SECURITY;
-ALTER TABLE measurement_templates DISABLE ROW LEVEL SECURITY;
-ALTER TABLE measurement_field_templates DISABLE ROW LEVEL SECURITY;
-ALTER TABLE customer_measurements DISABLE ROW LEVEL SECURITY;
+-- Step 7: Keep RLS enabled. Tenant policies live in
+-- supabase/migrations/20261114090000_enable_tenant_rls.sql — do not disable RLS.
+ALTER TABLE vendors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE staff ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE appointments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE measurement_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE measurement_field_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer_measurements ENABLE ROW LEVEL SECURITY;
 
 -- Step 8: Recreate all core database triggers (for order number auto-generation, outstanding calculations, balance updates)
 
 -- Trigger A: generate_order_number
 CREATE OR REPLACE FUNCTION generate_order_number()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
   v_prefix TEXT;
   v_seq INTEGER;
