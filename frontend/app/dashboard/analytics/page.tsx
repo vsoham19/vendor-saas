@@ -35,7 +35,6 @@ export default function AnalyticsDashboardPage() {
   type ChartTabType = 'trends' | 'breakdown' | 'pipeline';
   const [chartTab, setChartTab] = useState<ChartTabType>('trends');
   const [hoveredSegment, setHoveredSegment] = useState<number | null>(null);
-  const [hoveredRing, setHoveredRing] = useState<number | null>(null);
   const [activePointIdx, setActivePointIdx] = useState<number | null>(null);
 
   // Hard role guard restriction layer check (Securing client view paths)
@@ -368,7 +367,7 @@ export default function AnalyticsDashboardPage() {
               ? 'Progressive area-trend traces of manual payment credits captured across selected timeline ranges.' 
               : chartTab === 'breakdown' 
               ? 'Segmented revenue distribution mapping sales of Lehengas, Sarees, and Blouses.' 
-              : 'Concentric ring logs tracking order metrics currently running in active boutique status stages.'}
+              : 'Stage-by-stage order volume across the boutique production workflow.'}
           </p>
         </div>
 
@@ -680,102 +679,70 @@ export default function AnalyticsDashboardPage() {
         )}
 
         {chartTab === 'pipeline' && (
-          <div className="w-full bg-surface-container-low/20 border border-outline-variant/60 p-6 rounded-none select-none flex flex-col md:flex-row items-center justify-around gap-8">
+          <div className="w-full bg-surface-container-low/20 border border-outline-variant/60 p-6 rounded-none select-none">
             {(() => {
               const pipelineRings = matrix.pipelineRings || [];
-              
-              const svgWidth = 360;
-              const svgHeight = 220;
-              const centerX = 180;
-              const centerY = 110;
-              
-              const rings = [
-                { label: 'Delivered & Closed', color: '#2D6A4F', radius: 75, data: pipelineRings[3] },
-                { label: 'Ready for Trial', color: '#B07D05', radius: 58, data: pipelineRings[2] },
-                { label: 'In Production', color: '#80543c', radius: 41, data: pipelineRings[1] },
-                { label: 'Pending Receipt', color: '#9B2226', radius: 24, data: pipelineRings[0] }
+
+              const stages = [
+                { label: 'Pending Receipt', color: '#9B2226', data: pipelineRings[0] },
+                { label: 'In Production', color: '#80543c', data: pipelineRings[1] },
+                { label: 'Ready for Trial', color: '#B07D05', data: pipelineRings[2] },
+                { label: 'Delivered & Closed', color: '#2D6A4F', data: pipelineRings[3] }
               ];
 
-              const hoveredData = hoveredRing !== null ? rings[hoveredRing] : null;
+              const totalCount = stages.reduce((sum, stage) => sum + (stage.data?.count || 0), 0);
+              const maxCount = Math.max(...stages.map(stage => stage.data?.count || 0), 0);
+
+              if (totalCount === 0) {
+                return (
+                  <div className="w-full h-52 flex items-center justify-center text-xs font-semibold text-on-surface-variant/75 tracking-wide uppercase">
+                    No orders currently in the production pipeline
+                  </div>
+                );
+              }
 
               return (
-                <>
-                  <div className="relative w-[280px] h-[220px] shrink-0">
-                    <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-full font-sans overflow-visible">
-                      {rings.map((ring, idx) => {
-                        const circ = 2 * Math.PI * ring.radius;
-                        const pct = ring.data ? ring.data.percentage : 0;
-                        const strokeDashoffset = circ - (pct / 100) * circ;
-                        const isHovered = hoveredRing === idx;
-
-                        return (
-                          <g key={idx}>
-                            {/* Grey Track Background */}
-                            <circle
-                              cx={centerX}
-                              cy={centerY}
-                              r={ring.radius}
-                              fill="transparent"
-                              stroke={ring.color}
-                              strokeWidth={isHovered ? 12 : 8}
-                              strokeOpacity="0.1"
-                            />
-                            {/* Active Ring Stroke Fill */}
-                            <circle
-                              cx={centerX}
-                              cy={centerY}
-                              r={ring.radius}
-                              fill="transparent"
-                              stroke={ring.color}
-                              strokeWidth={isHovered ? 12 : 8}
-                              strokeLinecap="round"
-                              strokeDasharray={circ}
-                              strokeDashoffset={strokeDashoffset}
-                              transform={`rotate(-90 ${centerX} ${centerY})`}
-                              className="transition-all duration-300 cursor-pointer"
-                              onMouseEnter={() => setHoveredRing(idx)}
-                              onMouseLeave={() => setHoveredRing(null)}
-                            />
-                          </g>
-                        );
-                      })}
-                      
-                      {/* Ring HUD Center Indicator */}
-                      <g className="pointer-events-none">
-                        <text x={centerX} y={centerY - 10} textAnchor="middle" className="fill-ink-muted text-[9px] uppercase font-bold tracking-widest">
-                          {hoveredData ? hoveredData.label : 'Active Pipeline'}
-                        </text>
-                        <text x={centerX} y={centerY + 12} textAnchor="middle" className="fill-primary text-lg font-extrabold font-serif">
-                          {hoveredData ? `${hoveredData.data.count} Orders` : `${pipelineRings.reduce((sum, r) => sum + r.count, 0)} Total`}
-                        </text>
-                      </g>
-                    </svg>
+                <div className="space-y-5">
+                  <div className="flex items-baseline justify-between border-b border-outline-variant/60 pb-3">
+                    <h4 className="font-serif text-sm font-bold text-primary uppercase tracking-wide">Orders by Production Stage</h4>
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">{totalCount} Total Orders</span>
                   </div>
-                  
-                  {/* Radial Rings Legend Panel */}
-                  <div className="flex-grow space-y-4 max-w-sm w-full">
-                    <h4 className="font-serif text-sm font-bold text-primary uppercase tracking-wide border-b border-outline-variant/60 pb-2">Status Ring Distribution</h4>
-                    <div className="grid grid-cols-1 gap-2.5">
-                      {rings.map((ring, idx) => (
+
+                  <div className="space-y-4">
+                    {stages.map((stage, idx) => {
+                      const count = stage.data?.count || 0;
+                      const percentage = stage.data?.percentage || 0;
+                      const width = maxCount > 0 ? (count / maxCount) * 100 : 0;
+
+                      return (
                         <div
                           key={idx}
-                          onMouseEnter={() => setHoveredRing(idx)}
-                          onMouseLeave={() => setHoveredRing(null)}
-                          className={`flex justify-between items-center p-2.5 border transition-all cursor-pointer ${hoveredRing === idx ? 'bg-surface-container-low border-outline' : 'bg-transparent border-transparent'}`}
+                          className="grid grid-cols-[120px_1fr_74px] sm:grid-cols-[160px_1fr_90px] items-center gap-3"
+                          title={`${stage.label}: ${count} order${count === 1 ? '' : 's'} (${percentage}%)`}
                         >
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: ring.color }} />
-                            <span className="text-xs font-bold text-on-surface">{ring.label}</span>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: stage.color }} />
+                            <span className="text-[11px] sm:text-xs font-bold text-on-surface truncate">{stage.label}</span>
                           </div>
-                          <div className="text-right flex items-center gap-3">
-                            <span className="text-xs font-extrabold font-mono text-primary">{ring.data?.count || 0}</span>
-                            <span className="text-[10px] font-bold text-on-surface-variant font-mono">({ring.data?.percentage || 0}%)</span>
+                          <div
+                            className="h-6 bg-surface-container-low border border-outline-variant/40 relative overflow-hidden"
+                            role="img"
+                            aria-label={`${stage.label}: ${count} orders, ${percentage} percent`}
+                          >
+                            <div
+                              className="h-full transition-all duration-500"
+                              style={{ width: `${width}%`, backgroundColor: stage.color }}
+                            />
+                          </div>
+                          <div className="text-right font-mono text-xs whitespace-nowrap">
+                            <span className="font-extrabold text-primary">{count}</span>
+                            <span className="text-[10px] font-bold text-on-surface-variant ml-1.5">({percentage}%)</span>
                           </div>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
                   </div>
-                </>
+                </div>
               );
             })()}
           </div>
