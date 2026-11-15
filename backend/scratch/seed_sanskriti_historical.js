@@ -1005,9 +1005,18 @@ async function reconcileBalances(vendorId) {
 
     const { error } = await supabase
       .from('orders')
-      .update({ amount_paid: paid, amount_outstanding: outstanding })
+      .update({ amount_paid: paid })
       .eq('id', order.id);
     if (error) throw error;
+
+    // The calculate_order_outstanding trigger recalculates outstanding whenever
+    // amount_paid changes, so write the final value in a second update so that
+    // cancelled orders stay at zero.
+    const { error: outstandingErr } = await supabase
+      .from('orders')
+      .update({ amount_outstanding: outstanding })
+      .eq('id', order.id);
+    if (outstandingErr) throw outstandingErr;
   }
 
   for (const customerId of customerIds) {
