@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase';
 import { useAuthStore } from '@/store/authStore';
+import { buildPaymentReminderMessage, buildWhatsAppLink } from '@/utils/whatsapp';
 
 // Data models matching backend schema definitions
 interface CustomerProfile {
@@ -229,6 +230,23 @@ export default function CustomerProfilePage() {
             ₹{profile.total_outstanding.toLocaleString('en-IN')}
           </p>
           <p className="text-[10px] text-ink-muted mt-2">Maintained by automated DB triggers</p>
+          {profile.total_outstanding > 0 && (
+            <a
+              href={buildWhatsAppLink(
+                profile.phone,
+                buildPaymentReminderMessage({
+                  customerName: profile.full_name,
+                  amount: profile.total_outstanding
+                })
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 w-full min-h-[36px] bg-emerald-700 text-white text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 hover:bg-emerald-800 transition-colors"
+            >
+              <span className="material-symbols-outlined text-base">chat</span>
+              Send WhatsApp Reminder
+            </a>
+          )}
         </div>
       </div>
 

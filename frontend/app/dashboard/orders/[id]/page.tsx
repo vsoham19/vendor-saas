@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useOrders } from '@/hooks/useOrders';
 import { supabase } from '@/utils/supabase';
-import { sendOrderStatusUpdate } from '@/utils/whatsapp';
+import { buildOrderStatusMessage, buildPaymentReceiptMessage, buildWhatsAppLink } from '@/utils/whatsapp';
 
 interface LineItem {
   id: string;
@@ -74,27 +74,9 @@ export default function OrderDetailsPage() {
       if (error) throw new Error(error.message);
       return data;
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
-
-      // Trigger status update WhatsApp in the background
-      const updatedOrder = data?.[0];
-      if (updatedOrder && orderDetails?.customers) {
-        const customer = orderDetails.customers;
-        
-        supabase.from('order_items').select('item_name').eq('order_id', orderId).then(({ data: items }) => {
-          const itemSummary = items && items.length > 0 ? items.map(i => i.item_name).join(', ') : null;
-          
-          sendOrderStatusUpdate(
-            customer.name,
-            updatedOrder.order_number || '',
-            itemSummary,
-            updatedOrder.status,
-            customer.phone
-          ).catch(err => console.error('Failed to send order status WhatsApp notification:', err));
-        });
-      }
     }
   });
 
@@ -117,6 +99,18 @@ export default function OrderDetailsPage() {
   // Financial math calculations
   const totalPaid = order.payments.reduce((sum, pay) => sum + pay.amount, 0);
   const remainingDue = Math.max(0, order.total_amount - totalPaid);
+
+  const whatsappLink = order.customers?.phone
+    ? buildWhatsAppLink(
+        order.customers.phone,
+        buildOrderStatusMessage({
+          customerName: order.customers.full_name,
+          orderNumber: order.order_number,
+          description: order.description,
+          status: order.status
+        })
+      )
+    : '';
 
   const handlePaymentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -180,21 +174,36 @@ export default function OrderDetailsPage() {
           </div>
         </div>
 
-        {/* Change Status Dropdown Controller */}
-        <div className="flex items-center gap-2 text-xs font-bold text-on-surface-variant">
-          <label className="uppercase tracking-wide">Update Stage:</label>
-          <select
-            value={order.status}
-            disabled={updateStatusMutation.isPending}
-            onChange={(e) => updateStatusMutation.mutate(e.target.value as DetailedOrder['status'])}
-            className="min-h-[38px] px-3 bg-surface-container-low border border-outline-variant focus:ring-1 focus:ring-primary focus:outline-none"
-          >
-            <option value="pending">Pending</option>
-            <option value="in_progress">In Progress</option>
-            <option value="ready">Ready for Trial</option>
-            <option value="delivered">Delivered</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          {/* Change Status Dropdown Controller */}
+          <div className="flex items-center gap-2 text-xs font-bold text-on-surface-variant">
+            <label className="uppercase tracking-wide">Update Stage:</label>
+            <select
+              value={order.status}
+              disabled={updateStatusMutation.isPending}
+              onChange={(e) => updateStatusMutation.mutate(e.target.value as DetailedOrder['status'])}
+              className="min-h-[38px] px-3 bg-surface-container-low border border-outline-variant focus:ring-1 focus:ring-primary focus:outline-none"
+            >
+              <option value="pending">Pending</option>
+              <option value="in_progress">In Progress</option>
+              <option value="ready">Ready for Trial</option>
+              <option value="delivered">Delivered</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+
+          {whatsappLink && (
+            <a
+              href={whatsappLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="min-h-[38px] px-4 bg-emerald-700 text-white text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 hover:bg-emerald-800 transition-colors"
+              title="Open WhatsApp with a prefilled status message"
+            >
+              <span className="material-symbols-outlined text-base">chat</span>
+              Share Update
+            </a>
+          )}
         </div>
       </div>
 
@@ -382,18 +391,41 @@ export default function OrderDetailsPage() {
                   <th className="px-4 py-3">Channel</th>
                   <th className="px-4 py-3">Reference / Memo</th>
                   <th className="px-4 py-3 text-right">Credit</th>
+                  <th className="px-4 py-3 text-right">Receipt</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant font-medium text-on-surface">
                 {order.payments.length === 0 ? (
-                  <tr><td colSpan={4} className="p-4 text-center text-ink-muted">No advance payments recorded.</td></tr>
+                  <tr><td colSpan={5} className="p-4 text-center text-ink-muted">No advance payments recorded.</td></tr>
                 ) : (
-                  order.payments.map((pay) => (
+                  order.payments.map((pay, index) => (
                     <tr key={pay.id} className="zebra-row">
                       <td className="px-4 py-3.5 text-on-surface-variant">{new Date(pay.paid_at).toLocaleDateString('en-IN')}</td>
                       <td className="px-4 py-3.5"><span className="bg-surface-container px-2 py-0.5 border border-outline-variant font-mono">{pay.payment_mode}</span></td>
                       <td className="px-4 py-3.5 text-on-surface-variant max-w-[120px] truncate" title={pay.reference_note || ''}>{pay.reference_note || '--'}</td>
                       <td className="px-4 py-3.5 text-right font-bold text-status-paid">₹{pay.amount.toLocaleString('en-IN')}</td>
+                      <td className="px-4 py-3.5 text-right">
+                        {index === 0 && order.customers?.phone && (
+                          <a
+                            href={buildWhatsAppLink(
+                              order.customers.phone,
+                              buildPaymentReceiptMessage({
+                                customerName: order.customers.full_name,
+                                amount: pay.amount,
+                                paymentMethod: pay.payment_mode,
+                                orderNumber: order.order_number,
+                                outstandingBalance: remainingDue
+                              })
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Send payment receipt on WhatsApp"
+                            className="inline-flex items-center justify-center w-7 h-7 bg-emerald-700 text-white hover:bg-emerald-800 transition-colors"
+                          >
+                            <span className="material-symbols-outlined text-sm">chat</span>
+                          </a>
+                        )}
+                      </td>
                     </tr>
                   ))
                 )}

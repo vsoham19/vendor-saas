@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase';
 import { useAuthStore } from '@/store/authStore';
+import { buildPaymentReminderMessage, buildWhatsAppLink } from '@/utils/whatsapp';
 
 interface CustomerListItem {
   id: string;
@@ -200,11 +201,29 @@ function CustomerListContent() {
                   <span className="bg-surface-container px-2 py-0.5 font-medium">{customer.active_orders_count}</span>
                 </div>
                 
-                <div className="col-span-3 text-left sm:text-right font-bold pt-1 sm:pt-0">
+                <div className="col-span-3 text-left sm:text-right font-bold pt-1 sm:pt-0 flex items-center sm:justify-end gap-2">
                   <span className="sm:hidden text-ink-muted text-xs font-normal mr-1.5">Outstanding Balance:</span>
                   <span className={customer.total_outstanding > 0 ? 'text-status-due' : 'text-status-paid'}>
                     {customer.total_outstanding > 0 ? `₹${customer.total_outstanding.toLocaleString('en-IN')}` : 'Settled'}
                   </span>
+                  {customer.total_outstanding > 0 && (
+                    <a
+                      href={buildWhatsAppLink(
+                        customer.phone,
+                        buildPaymentReminderMessage({
+                          customerName: customer.full_name,
+                          amount: customer.total_outstanding
+                        })
+                      )}
+                      onClick={(event) => event.stopPropagation()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Send payment reminder on WhatsApp"
+                      className="inline-flex items-center justify-center w-8 h-8 bg-emerald-700 text-white hover:bg-emerald-800 transition-colors shrink-0"
+                    >
+                      <span className="material-symbols-outlined text-base">chat</span>
+                    </a>
+                  )}
                 </div>
               </div>
             ))}

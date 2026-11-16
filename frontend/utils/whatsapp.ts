@@ -1,109 +1,104 @@
-const BRIDGE_URL = process.env.WHATSAPP_BRIDGE_URL || '';
-const BRIDGE_API_KEY = process.env.WHATSAPP_BRIDGE_API_KEY || '';
-
 /**
- * Format a phone number to standard international structure without spaces, hyphens or plus.
- * If 10 digits are provided, prefixes with the country code '91' (India).
+ * WhatsApp helpers.
+ *
+ * We intentionally use wa.me deep links instead of sending through a server:
+ * the boutique owner reviews and sends the message from their own WhatsApp
+ * number, which is safer and works without any bridge infrastructure.
  */
+
+/** Normalize an Indian phone number into wa.me format (91XXXXXXXXXX). */
 export function formatPhoneNumber(phone: string): string {
-  let cleaned = phone.replace(/[^0-9]/g, '');
-  if (cleaned.length === 10) {
-    cleaned = '91' + cleaned;
+  let cleaned = (phone || '').replace(/[^0-9]/g, '');
+
+  if (cleaned.startsWith('00')) {
+    cleaned = cleaned.slice(2);
   }
+  if (cleaned.length === 11 && cleaned.startsWith('0')) {
+    cleaned = cleaned.slice(1);
+  }
+  if (cleaned.length === 10) {
+    cleaned = `91${cleaned}`;
+  }
+
   return cleaned;
 }
 
-/**
- * Dispatches a raw text message to the WhatsApp bridge API.
- */
-export async function sendWhatsAppMessage(phone: string, text: string): Promise<boolean> {
-  if (!BRIDGE_URL || !BRIDGE_API_KEY) {
-    console.warn('WhatsApp API bridge details not configured. Set WHATSAPP_BRIDGE_URL and WHATSAPP_BRIDGE_API_KEY.');
-    return false;
-  }
-
-  const cleanedPhone = formatPhoneNumber(phone);
-  if (!cleanedPhone) {
-    console.error('Invalid phone number provided:', phone);
-    return false;
-  }
-
-  try {
-    const response = await fetch(`${BRIDGE_URL.replace(/\/+$/, '')}/send-message`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BRIDGE_API_KEY}`
-      },
-      body: JSON.stringify({
-        phone: cleanedPhone,
-        message: text
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`WhatsApp Bridge API returned error status ${response.status}: ${errorText}`);
-      return false;
-    }
-
-    return true;
-  } catch (err) {
-    console.error('Failed to communicate with WhatsApp bridge:', err);
-    return false;
-  }
+/** Build a WhatsApp click-to-chat URL. Returns an empty string for invalid numbers. */
+export function buildWhatsAppLink(phone: string, message: string): string {
+  const normalized = formatPhoneNumber(phone);
+  if (!normalized) return '';
+  return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
 }
 
-/**
- * Format and send an appointment reminder.
- */
-export async function sendAppointmentReminder(
-  customerName: string,
-  title: string,
-  dateStr: string,
-  timeStr: string,
-  phone: string
-): Promise<boolean> {
-  const message = `Namaste ${customerName}, this is a reminder for your fitting/trial appointment '${title}' at Sanskriti Couture scheduled on ${dateStr}${timeStr ? ` at ${timeStr}` : ''}. We look forward to seeing you!`;
-  return sendWhatsAppMessage(phone, message);
+export function buildPaymentReminderMessage({
+  customerName,
+  amount,
+  orderNumber
+}: {
+  customerName: string;
+  amount: number;
+  orderNumber?: string | null;
+}): string {
+  const orderPart = orderNumber ? ` for order ${orderNumber}` : '';
+  return `Namaste ${customerName}, this is a gentle reminder that ₹${amount.toLocaleString('en-IN')} is pending${orderPart}. Kindly settle at your convenience. Thank you!`;
 }
 
-/**
- * Format and send an order status update.
- */
-export async function sendOrderStatusUpdate(
-  customerName: string,
-  orderNumber: string,
-  description: string | null,
-  status: string,
-  phone: string
-): Promise<boolean> {
-  // Map internal status tags to friendly customer labels
+export function buildOrderStatusMessage({
+  customerName,
+  orderNumber,
+  description,
+  status
+}: {
+  customerName: string;
+  orderNumber: string;
+  description?: string | null;
+  status: string;
+}): string {
   const friendlyStatusMap: Record<string, string> = {
     pending: 'Pending Receipt',
     in_progress: 'In Production',
-    ready: 'Ready for Trial 🎉',
-    delivered: 'Delivered & Closed 👗',
+    ready: 'Ready for Trial',
+    delivered: 'Delivered & Closed',
     cancelled: 'Cancelled'
   };
-  
+
   const friendlyStatus = friendlyStatusMap[status] || status;
   const itemDesc = description ? ` (${description})` : '';
-  const message = `Hello ${customerName}, your order ${orderNumber}${itemDesc} status is now updated to: *${friendlyStatus}*. Thank you!`;
-  return sendWhatsAppMessage(phone, message);
+  return `Hello ${customerName}, your order ${orderNumber}${itemDesc} is now *${friendlyStatus}*. Thank you!`;
 }
 
-/**
- * Format and send a payment confirmation receipt.
- */
-export async function sendPaymentReceipt(
-  customerName: string,
-  amount: number,
-  paymentMethod: string,
-  orderNumber: string,
-  outstandingBalance: number,
-  phone: string
-): Promise<boolean> {
-  const message = `Dear ${customerName}, we have received your payment of ₹${amount.toLocaleString('en-IN')} via ${paymentMethod || 'UPI'} for order ${orderNumber}. Outstanding balance: ₹${outstandingBalance.toLocaleString('en-IN')}. Thank you!`;
-  return sendWhatsAppMessage(phone, message);
+export function buildPaymentReceiptMessage({
+  customerName,
+  amount,
+  paymentMethod,
+  orderNumber,
+  outstandingBalance
+}: {
+  customerName: string;
+  amount: number;
+  paymentMethod: string;
+  orderNumber: string;
+  outstandingBalance: number;
+}): string {
+  return `Dear ${customerName}, we have received your payment of ₹${amount.toLocaleString('en-IN')} via ${paymentMethod || 'UPI'} for order ${orderNumber}. Outstanding balance: ₹${outstandingBalance.toLocaleString('en-IN')}. Thank you!`;
+}
+
+export function buildAppointmentMessage({
+  customerName,
+  title,
+  date,
+  time,
+  status
+}: {
+  customerName: string;
+  title: string;
+  date: string;
+  time?: string | null;
+  status?: string;
+}): string {
+  const when = `${date}${time ? ` at ${time}` : ''}`;
+  if (status === 'scheduled') {
+    return `Namaste ${customerName}, your appointment '${title}' is confirmed for ${when}. See you at the studio!`;
+  }
+  return `Namaste ${customerName}, this is a reminder for your appointment '${title}' on ${when}. See you at the studio!`;
 }

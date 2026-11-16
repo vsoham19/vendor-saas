@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase';
 import { useAuthStore } from '@/store/authStore';
+import { buildAppointmentMessage, buildWhatsAppLink } from '@/utils/whatsapp';
 
 interface AppointmentItem {
   id: string;
@@ -305,6 +306,28 @@ export default function AppointmentCalendarPage() {
                     appt.status === 'cancelled' ? 'bg-red-50 text-red-700 border border-red-200' :
                     'bg-amber-50 text-amber-700 border border-amber-200'
                   }`}>{appt.status}</span>
+                  {appt.customer_phone && (
+                    <a
+                      href={buildWhatsAppLink(
+                        appt.customer_phone,
+                        buildAppointmentMessage({
+                          customerName: appt.customer_name,
+                          title: appt.title,
+                          date: new Date(appt.scheduled_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+                          time: appt.time_slot,
+                          status: appt.status
+                        })
+                      )}
+                      onClick={(event) => event.stopPropagation()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-700 text-white text-[9px] font-bold uppercase tracking-wider hover:bg-emerald-800 transition-colors"
+                      title="Open WhatsApp with a prefilled appointment message"
+                    >
+                      <span className="material-symbols-outlined text-sm">chat</span>
+                      WhatsApp
+                    </a>
+                  )}
                 </div>
               </div>
             ))
@@ -589,6 +612,27 @@ export default function AppointmentCalendarPage() {
                   </button>
                 )}
               </div>
+
+              {selectedAppointment.customer_phone && (
+                <a
+                  href={buildWhatsAppLink(
+                    selectedAppointment.customer_phone,
+                    buildAppointmentMessage({
+                      customerName: selectedAppointment.customer_name,
+                      title: selectedAppointment.title,
+                      date: new Date(selectedAppointment.scheduled_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+                      time: selectedAppointment.time_slot,
+                      status: selectedAppointment.status
+                    })
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full min-h-[38px] bg-emerald-700 text-white text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 hover:bg-emerald-800 transition-colors"
+                >
+                  <span className="material-symbols-outlined text-base">chat</span>
+                  Send WhatsApp Message
+                </a>
+              )}
             </div>
 
             {/* EXPANDABLE MANAGEMENT AND RESCHEDULING PANEL */}
